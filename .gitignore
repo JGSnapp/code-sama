@@ -5,6 +5,7 @@ __pycache__/
 models.yml
 .playwright/
 node_modules/
+dist/
 logs/
 workspace/
 aikeya/

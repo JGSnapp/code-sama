@@ -159,3 +159,17 @@ Inspect the current surface at `GET /tools`.
 `server/mcp_hook.py` is an extension point: register MCP servers and
 their tools become first-class tools on the next registry rebuild. The
 base image doesn't ship the `mcp` package — `pip install mcp` to enable.
+
+## TypeScript MVP (legacy)
+
+Ранний MVP из `Code-sama-architecture.md` остаётся в `src/`:
+
+```bash
+npm install
+npm run check
+```
+
+- Точка входа рантайма: `src/runtime/orchestrator.ts`
+- Scene/state/event bus: `src/core/*`
+- Агенты: `src/agents/*`
+- Проверки соответствия требованиям: `tests/architecture.spec.ts`
