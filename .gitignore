@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+models.yml
+.playwright/
+node_modules/
+logs/
+workspace/
+aikeya/
+OmniVoice/
+.claude/

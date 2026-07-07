@@ -1,0 +1,18 @@
+services:
+  code-sama-os:
+    build: .
+    image: code-sama-os:latest
+    container_name: code-sama-os
+    ports:
+      - "8765:8765"
+    env_file:
+      - .env
+    volumes:
+      # Code-sama's persistent project directory — lives across container
+      # rebuilds so anything she writes stays on disk.
+      - ./workspace:/workspace
+      # Logs land here so you can `tail -f logs/code-sama-os.log` from the
+      # host without exec'ing into the container.
+      - ./logs:/opt/code-sama/logs
+    shm_size: "1gb"   # Chromium + X likes shared memory
+    restart: unless-stopped

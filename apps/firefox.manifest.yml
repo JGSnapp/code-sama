@@ -1,0 +1,98 @@
+app: firefox
+title: Firefox
+icon: browser
+description: Веб-браузер Firefox — агент может открывать сайты, искать, ходить назад/вперёд, открывать новые вкладки.
+version: "1.0"
+source: manual
+
+package:
+  apt: firefox-esr
+  command: firefox
+  setup:
+    - "apt-get update"
+    - "apt-get install -y firefox-esr dbus-x11"
+
+launch:
+  cmd: "firefox --new-window about:blank"
+  width: 900
+  height: 560
+
+elements:
+  url_bar:
+    role: ENTRY
+    name: "Search with DuckDuckGo or enter address"
+  nav_back:
+    role: PUSH_BUTTON
+    name: "Back"
+  nav_forward:
+    role: PUSH_BUTTON
+    name: "Forward"
+  nav_reload:
+    role: PUSH_BUTTON
+    name: "Reload"
+  new_tab_btn:
+    role: PUSH_BUTTON
+    name: "New Tab"
+  tab_close:
+    role: PUSH_BUTTON
+    name: "Close Tab"
+  first_link:
+    role: LINK
+    text_hint: "first content link"
+
+actions:
+  navigate:
+    params: { url: "str" }
+    narration: "Иду в адресную строку, ввожу {url}…"
+    steps:
+      - click: url_bar
+        dwell: 200
+      - type: "{url}"
+      - key: Enter
+      - wait: 1500
+
+  search:
+    params: { query: "str" }
+    narration: "Ищу «{query}»…"
+    steps:
+      - click: url_bar
+        dwell: 200
+      - type: "{query}"
+      - key: Enter
+      - wait: 1800
+
+  go_back:
+    narration: "Жму «Назад»…"
+    steps:
+      - click: nav_back
+      - wait: 1000
+
+  go_forward:
+    narration: "Жму «Вперёд»…"
+    steps:
+      - click: nav_forward
+      - wait: 1000
+
+  reload:
+    narration: "Перезагружаю страницу…"
+    steps:
+      - click: nav_reload
+      - wait: 1500
+
+  new_tab:
+    narration: "Открываю новую вкладку…"
+    steps:
+      - click: new_tab_btn
+      - wait: 400
+
+  close_tab:
+    narration: "Закрываю вкладку…"
+    steps:
+      - click: tab_close
+      - wait: 300
+
+  click_first_link:
+    narration: "Кликаю первый результат…"
+    steps:
+      - click: first_link
+      - wait: 1500

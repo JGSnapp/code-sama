@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>code-sama-os</title>
+  <meta name="viewport" content="width=1480, initial-scale=1" />
+  <link rel="stylesheet" href="/css/style.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/javascript/javascript.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/htmlmixed/htmlmixed.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/xml/xml.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/css/css.min.js"></script>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/",
+      "@pixiv/three-vrm": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@3.4.5/lib/three-vrm.module.min.js"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="layout">
+    <div id="os-wrap">
+      <div id="os" class="os">
+        <div id="desktop" class="desktop">
+          <div class="desk-icons">
+            <div class="desk-icon"><div class="ico ico-mycomputer"></div><span>My Computer</span></div>
+            <div class="desk-icon"><div class="ico ico-recycle"></div><span>Recycle Bin</span></div>
+            <div class="desk-icon"><div class="ico ico-browser"></div><span>Internet</span></div>
+            <div class="desk-icon"><div class="ico ico-editor"></div><span>Notepad++</span></div>
+            <div class="desk-icon"><div class="ico ico-paint"></div><span>Paint</span></div>
+            <div class="desk-icon"><div class="ico ico-music"></div><span>Media Player</span></div>
+            <div class="desk-icon"><div class="ico ico-tracker"></div><span>Task Tracker</span></div>
+          </div>
+        </div>
+        <div id="windows"></div>
+        <div id="start-menu" aria-hidden="true">
+          <div class="start-side">code-<b>sama</b> OS</div>
+          <div class="start-list">
+            <div class="sm-item"><div class="sm-ico ico-mycomputer" style="width:24px;height:24px;"></div>Programs</div>
+            <div class="sm-item"><div class="sm-ico ico-tracker" style="width:24px;height:24px;"></div>Documents</div>
+            <div class="sm-item"><div class="sm-ico ico-paint" style="width:24px;height:24px;"></div>Settings</div>
+            <div class="sm-item"><div class="sm-ico ico-browser" style="width:24px;height:24px;"></div>Find</div>
+            <hr />
+            <div class="sm-item"><div class="sm-ico ico-editor" style="width:24px;height:24px;"></div>Run…</div>
+            <div class="sm-item"><div class="sm-ico ico-music" style="width:24px;height:24px;"></div>Shut Down…</div>
+          </div>
+        </div>
+        <svg id="cursor" viewBox="0 0 24 24" width="22" height="22">
+          <path d="M2 2 L2 18 L7 14 L10 22 L13 21 L10 13 L17 13 Z"
+                fill="#fff" stroke="#000" stroke-width="1.2" stroke-linejoin="round" />
+        </svg>
+        <div id="click-fx"></div>
+        <div id="taskbar">
+          <div id="start">
+            <div class="start-glyph"></div>
+            <span>Start</span>
+          </div>
+          <div id="taskbar-items"></div>
+          <div id="tray">
+            <div class="ti ti-network" title="Network"></div>
+            <div class="ti ti-speaker" title="Sound"></div>
+            <div class="ti ti-pwr" title="Power"></div>
+            <div id="clock">--:--</div>
+          </div>
+        </div>
+        <div id="boot">
+          <div class="logo">code-sama OS</div>
+          <div class="boot-bar"><i></i></div>
+          <p>Loading agent runtime…</p>
+        </div>
+      </div>
+    </div>
+
+    <aside id="side">
+      <div id="cam">
+        <div id="cam-frame">
+          <iframe id="cam-iframe" referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin" style="display:none;"></iframe>
+          <div id="cam-3d"></div>
+          <canvas id="cam-canvas" width="320" height="240" style="display:none;"></canvas>
+          <div id="cam-overlay">
+            <div class="rec"><span class="dot"></span>REC</div>
+            <div class="caption" id="cam-caption"></div>
+          </div>
+        </div>
+        <div id="cam-label">Agent Webcam<span id="status-dot"></span><small id="status-text">idle</small></div>
+      </div>
+      <div id="chat">
+        <div id="chat-head">code-sama agent</div>
+        <div id="chat-log"></div>
+        <form id="chat-form" autocomplete="off">
+          <input id="chat-input" placeholder="Опиши задачу — агент сделает её внутри ОС…" />
+          <button type="submit">Send</button>
+        </form>
+      </div>
+    </aside>
+  </div>
+
+  <script type="module" src="/js/main.js"></script>
+</body>
+</html>

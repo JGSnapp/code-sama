@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.playwright/
+logs/
+workspace/
+node_modules/
+shot_*.png
+shot_*.jpg
+.claude/
+.git/

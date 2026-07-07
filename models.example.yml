@@ -1,0 +1,63 @@
+# code-sama-os model configuration.
+#
+# Copy this to models.yml and edit. Each *role* maps to a provider +
+# model + sampling params, so you can put a strong coding model on the
+# worker, a small fast one on the narrator, a vision model on the
+# resolver, etc.
+#
+# ${VAR} placeholders are interpolated from the environment (your .env),
+# so you don't have to paste keys here.
+
+providers:
+  # OpenRouter / ProxyAPI — the default, one key covers many models.
+  openrouter:
+    base_url: https://api.proxyapi.ru/openrouter/v1
+    api_key: ${PROXY_API_KEY}
+
+  # Direct OpenAI — use for vision (gpt-4o) and the latest reasoning.
+  openai:
+    base_url: https://api.openai.com/v1
+    api_key: ${OPENAI_API_KEY}
+
+  # Local Ollama — great for the narrator (low latency, no per-call cost).
+  ollama:
+    base_url: http://localhost:11434/v1
+    api_key: ollama
+
+roles:
+  # The chatty front-of-house. Warm, fast, talks to the user.
+  streamer:
+    provider: openrouter
+    model: qwen/qwen3-235b-a22b-2507
+    temperature: 0.55
+
+  # The hands. Strong coding model — spends the most tokens, so pick wisely.
+  worker:
+    provider: openrouter
+    model: anthropic/claude-sonnet-4.5
+    temperature: 0.2
+
+  # Live commentary while the worker is busy. Small + cheap + fast.
+  narrator:
+    provider: ollama
+    model: qwen2.5:7b
+    temperature: 0.6
+    max_tokens: 80
+
+  # Manifest generator (the CLI-Anything-style harness).
+  harness:
+    provider: openrouter
+    model: qwen/qwen3-235b-a22b-2507
+    temperature: 0.2
+
+  # Vision-based element resolver (fallback when AT-SPI misses).
+  vision:
+    provider: openai
+    model: gpt-4o
+    temperature: 0.1
+
+  # Reserved for a future high-level planner.
+  planner:
+    provider: openrouter
+    model: openai/o3
+    temperature: 0.3

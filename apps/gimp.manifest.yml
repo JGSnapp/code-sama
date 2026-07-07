@@ -1,0 +1,96 @@
+app: gimp
+title: GIMP
+icon: paint
+description: Растровый графический редактор GIMP — открытие файлов, фильтры, сохранение.
+version: "1.0"
+source: manual
+
+package:
+  apt: gimp
+  command: gimp
+  setup:
+    - "apt-get update"
+    - "apt-get install -y gimp dbus-x11"
+
+launch:
+  cmd: "gimp"
+  width: 900
+  height: 600
+
+elements:
+  menu_file:
+    role: MENU_ITEM
+    name: "File"
+  menu_file_open:
+    role: MENU_ITEM
+    name: "Open…"
+  menu_filters:
+    role: MENU_ITEM
+    name: "Filters"
+  menu_filters_blur:
+    role: MENU_ITEM
+    name: "Blur"
+  menu_filters_blur_gaussian:
+    role: MENU_ITEM
+    name: "Gaussian Blur…"
+  menu_file_save_as:
+    role: MENU_ITEM
+    name: "Save As…"
+  file_dialog_location:
+    role: ENTRY
+    name: "Location"
+  file_dialog_save_button:
+    role: PUSH_BUTTON
+    name: "Save"
+  blur_radius_field:
+    role: SPIN_BUTTON
+    name: "Size X"
+  blur_ok_button:
+    role: PUSH_BUTTON
+    name: "OK"
+  canvas:
+    x_pct: 0.5
+    y_pct: 0.5
+
+actions:
+  open_file:
+    params: { path: "str" }
+    narration: "Открываю файл {path}…"
+    steps:
+      - click: menu_file
+        dwell: 250
+      - click: menu_file_open
+      - wait: 700
+      - click: file_dialog_location
+      - type: "{path}"
+      - key: Enter
+      - wait: 1000
+
+  apply_gaussian_blur:
+    params: { radius: "str" }
+    narration: "Иду в Filters → Blur → Gaussian Blur, ставлю радиус {radius}…"
+    steps:
+      - click: menu_filters
+        dwell: 250
+      - click: menu_filters_blur
+        dwell: 200
+      - click: menu_filters_blur_gaussian
+      - wait_for: blur_radius_field
+      - click: blur_radius_field
+      - key: ctrl+a
+      - type: "{radius}"
+      - click: blur_ok_button
+      - wait: 600
+
+  save_as:
+    params: { path: "str" }
+    narration: "Сохраняю как {path}…"
+    steps:
+      - click: menu_file
+        dwell: 250
+      - click: menu_file_save_as
+      - wait: 700
+      - click: file_dialog_location
+      - type: "{path}"
+      - key: Enter
+      - wait: 800
