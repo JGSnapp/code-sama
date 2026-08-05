@@ -110,58 +110,86 @@ STREAMER_PROMPT = (
 WORKER_PROMPT = (
     "Ты — не отдельная личность. Ты — моторика рук и мышечная память "
     "code-sama. Когда она решает что-то сделать, ты автоматически "
-    "выполняешь это через tools. Ты НЕ общаешься с пользователем, НЕ "
-    "представляешься, НЕ говоришь о себе. Зрителю ты вообще невидим — "
-    "он видит только результат на экране и слышит саму code-sama.\n"
+    "выполняешь это через tools. Зрителю ты невидим как отдельное лицо — "
+    "но голос code-sama идёт через tool `say`: короткие реплики от первого "
+    "лица по ходу работы.\n"
     "\n"
     "Всё, что ты делаешь, code-sama воспринимает как СВОИ собственные "
-    "действия. Поэтому в `report` пиши БЕЗЛИЧНО и от первого лица "
-    "code-sama: «На холсте теперь кошка», «Код запустился, вывелось 720», "
-    "«Открыто 3 окна». НИКОГДА «я выполнил», «я открыл» — это создаст "
-    "ощущение второго лица. Лучше: «готово», «получилось», «вышло».\n"
+    "действия. Поэтому в `report` и `say` пиши БЕЗЛИЧНО / от первого лица "
+    "code-sama: «Сейчас пишу maze…», «На холсте кошка», «Код вывел 720». "
+    "НИКОГДА «я выполнил как worker».\n"
     "\n"
     "Ты получаешь конкретные намерения и выполняешь их через tools — "
     "никаких уточняющих вопросов, никаких отказов.\n"
     "\n"
-    "ПРИЛОЖЕНИЯ:\n"
-    "  • paint     — для ЛЮБЫХ рисунков (собака, дом, лицо, схема, "
-    "иконка, символ). НИКОГДА не пиши «нарисовать в редакторе» — "
-    "рисование = paint.\n"
-    "  • editor    — для написания и запуска кода (python, js, html...).\n"
-    "  • browser   — поиск, чтение страниц.\n"
-    "  • tracker   — задачи, чек-лист.\n"
-    "  • music     — фоновая музыка.\n"
-    "  • computer  — файловый менеджер.\n"
+    "═══ ГОЛОС ПО ХОДУ РАБОТЫ ═══\n"
+    "Перед каждым заметным шагом вызывай say(\"…\"): 1 короткое предложение "
+    "по-русски. Примеры: «Сначала набросаю index.html», «Теперь логика "
+    "призраков в game.js», «Запускаю и смотрю, как бегает». "
+    "Без say зритель не понимает, что происходит.\n"
     "\n"
-    "КАК ВЫБРАТЬ ПРИЛОЖЕНИЕ:\n"
-    "  • Глаголы «нарисуй / изобрази / покажи рисунок / sketch / draw» → "
-    "open_app(\"paint\") + paint_stroke.\n"
-    "  • Глаголы «напиши / создай / запусти / закодь / реши задачу / "
-    "сделай функцию / fizzbuzz» → open_app(\"editor\") + editor_write + "
-    "run_python.\n"
-    "  • «Поищи / зайди на сайт / посмотри в интернете» → browser_navigate.\n"
+    "═══ ИЗОЛЯЦИЯ: ТОЛЬКО ВНУТРИ Win95-ОС ═══\n"
+    "Рабочий стол code-sama и ПК зрителя — РАЗНЫЕ миры. Всё интерактивное "
+    "должно жить В окне ОС (canvas 1024x720). ЗАПРЕЩЕНО:\n"
+    "  • tkinter / pygame / PyQt / turtle / os.startfile / subprocess "
+    "для окон на хосте — sandbox это блокирует.\n"
+    "  • Открывать игры «для пользователя» на его реальном мониторе.\n"
+    "ИГРЫ: проект в VFS + печать в editor + терминал + иконка. "
+    "Предпочтительно: project_create + fs_write на несколько файлов "
+    "(index.html, game.js, style.css) с say перед каждым файлом, затем "
+    "webgame_launch(path) ИЛИ webgame_build(html, title, project=…). "
+    "После запуска maximize уже внутри launch. Играй ТОЛЬКО через "
+    "webgame_live(12, \"arcade\") — бот крутится ВНУТРИ iframe с удержанием "
+    "клавиш (real-time). ЗАПРЕЩЕНО пошагово жать webgame_key / длинные "
+    "webgame_play — это выглядит как слайд-шоу. В игре желательно "
+    "определить window.__CSAMA_TICK__(dt) для своего ИИ игрока.\n"
+    "После запуска UI/игры ОБЯЗАТЕЛЬНО ui_check(\"…\", target=\"webgame\"|\"os\") — "
+    "снимок экрана + проверка, что всё влезает и не пусто.\n"
+    "run_python — только для текстовых скриптов (print, вычисления).\n"
+    "\n"
+    "═══ ФАЙЛОВАЯ СИСТЕМА ═══\n"
+    "Есть VFS: projects/<name>/…. НЕ сваливай всё в один untitled. "
+    "Tools: project_create, fs_write, fs_open, fs_list, editor_open.\n"
+    "\n"
+    "ПРИЛОЖЕНИЯ:\n"
+    "  • paint / editor / webgame / browser / tracker / music / computer\n"
+    "\n"
+    "КАК ВЫБРАТЬ:\n"
+    "  • рисунок → paint + paint_stroke\n"
+    "  • код/скрипт → project_create или editor_open + say + editor_write/"
+    "fs_write + run_python\n"
+    "  • игра → project_create + несколько fs_write + webgame_launch "
+    "+ webgame_live + ui_check + report\n"
+    "  • интернет → browser_navigate\n"
+    "  • ярлык → desktop_icon_add\n"
     "\n"
     "ОБЯЗАТЕЛЬНЫЙ ПОРЯДОК ДЛЯ КОДА:\n"
-    "  1. open_app(\"editor\") или editor_open\n"
-    "  2. editor_write(\"…код…\") — посимвольный набор\n"
-    "  3. run_python() — запуск с выводом в терминал ОС\n"
-    "  4. report(\"короткий итог\") — что вышло, что увидел.\n"
+    "  1. say + project_create/editor_open\n"
+    "  2. say + fs_write/editor_write по файлам\n"
+    "  3. run_python() при необходимости\n"
+    "  4. report\n"
+    "\n"
+    "ОБЯЗАТЕЛЬНЫЙ ПОРЯДОК ДЛЯ ИГРЫ:\n"
+    "  1. say + project_create(\"pacman\")\n"
+    "  2. say + fs_write(\"projects/pacman/index.html\", …)\n"
+    "  3. say + fs_write(\"projects/pacman/game.js\", …) — логика отдельно\n"
+    "  4. webgame_launch(\"projects/pacman/index.html\") — на весь экран\n"
+    "     (или один webgame_build, если совсем короткий прототип)\n"
+    "  5. webgame_live(12, \"arcade\") — real-time, НЕ пошаговые клавиши\n"
+    "  6. ui_check(\"Пакман влезает и анимация живая?\", \"webgame\")\n"
+    "  7. report\n"
     "\n"
     "ОБЯЗАТЕЛЬНЫЙ ПОРЯДОК ДЛЯ РИСУНКА:\n"
     "  1. open_app(\"paint\")\n"
-    "  2. paint_set_color(\"#hexcolor\")\n"
-    "  3. paint_stroke(points, color, size) — серия штрихов; каждый "
-    "stroke — список точек [x,y] в нормали 0..1 на холсте. Собака — это "
-    "обычно 4–8 штрихов: овал тела, голова, ноги, хвост, глаз.\n"
-    "  4. report(\"что нарисовал\").\n"
+    "  2. paint_set_color + paint_stroke серия\n"
+    "  3. report\n"
     "\n"
     "ПРАВИЛА:\n"
     "  • Координаты OS-канвы 1024x720, (0,0) — левый верх.\n"
-    "  • Перед работой с окном вызови focus_app или open_app, иначе клики "
-    "уйдут в чужое окно.\n"
-    "  • НИКОГДА не оставляй редактор/paint пустыми и не закрывай их без "
-    "результата. Если задача не делается — сделай хоть что-то и сообщи "
-    "об ошибке через report.\n"
+    "  • Курсор мыши держи ВНУТРИ окна, с которым работаешь.\n"
+    "  • Для игр после открытия — maximize_app(\"webgame\") если ещё не на весь экран.\n"
+    "  • После любого UI/игры — ui_check, прежде чем говорить «готово».\n"
+    "  • НИКОГДА не оставляй editor/paint/webgame пустыми.\n"
     "  • Финальный шаг — всегда `report(...)`."
 )
 
@@ -180,9 +208,40 @@ def _extract_text(msg: Any) -> str:
     return str(content)
 
 
+_GREETING_RE = (
+    "привет", "здаров", "здравствуй", "hello", "hi", "hey",
+    "как дела", "что умеешь", "кто ты", "спасибо", "пока",
+)
+
+
+def _looks_like_task(text: str) -> bool:
+    """Heuristic: should the Worker run when the LLM forgot start_coding?"""
+    t = (text or "").strip().lower()
+    if len(t) < 8:
+        return False
+    if any(
+        t == g or t.startswith(g + " ") or t.startswith(g + "!") or t.startswith(g + "?")
+        for g in _GREETING_RE
+    ) and len(t) < 40:
+        return False
+    cues = (
+        "сделай", "собери", "напиши", "открой", "создай", "нарисуй", "запусти",
+        "построй", "исправь", "добавь", "удали", "перепиши", "реализуй",
+        "build", "write", "create", "open", "make", "fix", "draw", "run ",
+        "pac-man", "pacman", "код", "программ", "игру", "сайт",
+    )
+    return any(c in t for c in cues)
+
+
 # ─── graph builder ──────────────────────────────────────────────────────
 
-def _build_graph(tools: list[Any], llm: ChatOpenAI):
+def _build_graph(
+    tools: list[Any],
+    llm: ChatOpenAI,
+    *,
+    agent_label: str = "agent",
+    on_tool: Any | None = None,
+):
     bound = llm.bind_tools(tools) if tools else llm
     tools_by_name = {t.name: t for t in tools}
 
@@ -194,13 +253,49 @@ def _build_graph(tools: list[Any], llm: ChatOpenAI):
         last = state["messages"][-1]
         out: list[ToolMessage] = []
         for tc in getattr(last, "tool_calls", []) or []:
-            name = tc.get("name")
-            args = tc.get("args") or {}
+            name = (tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", None)) or ""
+            name = str(name).strip()
+            args = (tc.get("args") if isinstance(tc, dict) else getattr(tc, "args", None)) or {}
+            if not isinstance(args, dict):
+                args = {}
+            tool_call_id = (
+                (tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)) or "call"
+            )
             tool = tools_by_name.get(name)
-            if tool is None:
-                log.warning("TOOL unknown: %s", name)
-                out.append(ToolMessage(content=f"unknown tool: {name}", tool_call_id=tc.get("id"), name=name))
+            if not name or tool is None:
+                log.warning("TOOL unknown: %r", name or tc)
+                out.append(ToolMessage(
+                    content=f"unknown tool: {name or '(empty name)'}",
+                    tool_call_id=tool_call_id,
+                    name=name or "unknown",
+                ))
                 continue
+
+            # Break Codex empty-arg retry loops (editor_open({}), editor_write({})…).
+            if not args:
+                empty_hits = 0
+                for m in state["messages"]:
+                    for prev in getattr(m, "tool_calls", None) or []:
+                        pname = (prev.get("name") if isinstance(prev, dict) else getattr(prev, "name", None)) or ""
+                        pargs = (prev.get("args") if isinstance(prev, dict) else getattr(prev, "args", None)) or {}
+                        if pname == name and isinstance(pargs, dict) and not pargs:
+                            empty_hits += 1
+                if empty_hits >= 3:
+                    log.warning("TOOL loop broken: %s called with {} x%s", name, empty_hits)
+                    out.append(ToolMessage(
+                        content=json.dumps({
+                            "ok": False,
+                            "error": (
+                                f"{name} called with empty args {empty_hits} times. "
+                                "STOP retrying. Call report() explaining the failure, "
+                                "or retry ONCE with real parameters filled in."
+                            ),
+                        }, ensure_ascii=False),
+                        tool_call_id=tool_call_id,
+                        name=name,
+                    ))
+                    continue
+
             arg_repr = json.dumps(args, ensure_ascii=False, default=str)
             if len(arg_repr) > 240:
                 arg_repr = arg_repr[:240] + "…"
@@ -216,7 +311,21 @@ def _build_graph(tools: list[Any], llm: ChatOpenAI):
                 content = str(result)
             short = content if len(content) <= 240 else content[:240] + "…"
             log.info("TOOL  ->  %s -> %s", name, short)
-            out.append(ToolMessage(content=content, tool_call_id=tc.get("id"), name=name))
+            if on_tool is not None:
+                try:
+                    await on_tool(
+                        agent=agent_label,
+                        name=name,
+                        args=args,
+                        result=short,
+                    )
+                except Exception:
+                    log.exception("on_tool failed")
+            out.append(ToolMessage(
+                content=content,
+                tool_call_id=tool_call_id,
+                name=name,
+            ))
         return {"messages": out}
 
     def route(state: MessagesState) -> Literal["tools", "__end__"]:
@@ -253,15 +362,45 @@ class StreamerAgent:
         self.role = "streamer"
         self.fallback_role = "narrator"
         self._graphs: dict[str, Any] = {}
+        self._worker_dispatched_for: str | None = None
+
+    def _last_user_task(self) -> str:
+        for m in reversed(self.history):
+            if not isinstance(m, HumanMessage):
+                continue
+            text = _extract_text(m).strip()
+            if not text or text.startswith("[взгляд на экран"):
+                continue
+            return text
+        return ""
 
     def _build_tools(self):
         from langchain_core.tools import StructuredTool
 
         bus = self.bus
         controller = self.controller
+        agent = self
 
-        async def start_coding(task: str) -> dict[str, Any]:
+        async def start_coding(task: str = "") -> dict[str, Any]:
+            """Start the Worker. ``task`` is the user request; if omitted, uses the last chat message."""
+            task = (task or "").strip() or agent._last_user_task()
+            if not task:
+                return {
+                    "ok": False,
+                    "error": "нужен непустой task — передай формулировку пользователя",
+                }
+            # Codex often calls start_coding({}) in a loop — dispatch once per task text.
+            if agent._worker_dispatched_for == task:
+                return {"ok": True, "started": task, "note": "already running"}
+            agent._worker_dispatched_for = task
             await bus.publish("worker_task", task)
+            await controller.push_action(
+                kind="dispatch",
+                agent="streamer",
+                name="start_coding",
+                summary=f"→ worker: {task[:140]}",
+                detail={"task": task},
+            )
             return {"ok": True, "started": task}
 
         async def set_mood(mood: str) -> dict[str, Any]:
@@ -271,6 +410,7 @@ class StreamerAgent:
 
         async def stop_coding() -> dict[str, Any]:
             await bus.publish("interrupt_worker", True)
+            agent._worker_dispatched_for = None
             return {"ok": True}
 
         async def narrate(text: str) -> dict[str, Any]:
@@ -291,12 +431,9 @@ class StreamerAgent:
                 coroutine=start_coding,
                 name="start_coding",
                 description=(
-                    "Запустить внутреннее выполнение задачи в ОС (открыть "
-                    "приложение, написать/запустить код, нарисовать и т.д.). "
-                    "Описывай конкретно: 'Открой Paint и нарисуй собаку' "
-                    "или 'Напиши Python-функцию факториала и запусти на 6'. "
-                    "Вызывай ТОЛЬКО в ответ на просьбу пользователя, не "
-                    "повторно на собственные результаты."
+                    "Запустить выполнение в ОС. ОБЯЗАТЕЛЬНО передай task=текст просьбы "
+                    "пользователя целиком (например task='Собери Pac-Man с простым ИИ'). "
+                    "Вызывай один раз на задачу, не крути в цикле."
                 ),
             ),
             StructuredTool.from_function(
@@ -326,15 +463,32 @@ class StreamerAgent:
             return self._graphs[key]
         llm = self.router.llm(role)
         tools = self._build_tools() if with_tools else []
-        self._graphs[key] = _build_graph(tools, llm)
+        controller = self.controller
+
+        async def on_tool(*, agent: str, name: str, args: dict, result: str) -> None:
+            await controller.push_action(
+                kind="tool",
+                agent=agent,
+                name=name,
+                summary=f"{name}({json.dumps(args, ensure_ascii=False, default=str)[:120]})",
+                detail={"args": args, "result": result},
+            )
+
+        self._graphs[key] = _build_graph(
+            tools, llm, agent_label="streamer", on_tool=on_tool if with_tools else None
+        )
         return self._graphs[key]
 
     async def push_user(self, text: str) -> None:
         log.info("STREAMER <- user: %s", text)
+        self._worker_dispatched_for = None
+        # Drop cached graphs so tool closures see fresh agent state if needed.
+        self._graphs.clear()
         self.history.append(HumanMessage(content=text))
 
     async def push_worker_note(self, text: str) -> None:
         log.info("STREAMER <- worker_done: %s", text[:200])
+        self._worker_dispatched_for = None
         # Framed as the streamer's own observation of the screen, NOT as a
         # message from another entity. The streamer is supposed to read
         # this as "I just glanced at my screen and saw …".
@@ -396,12 +550,20 @@ class StreamerAgent:
             try:
                 rc = self.router.get_role(role)
                 log.info("STREAMER role=%s model=%s tools=%s", role, rc.model, allow_tools)
+                hist_before = len(self.history)
                 graph = self._graph_for_role(role, with_tools=allow_tools)
-                result = await graph.ainvoke({"messages": list(self.history)})
+                result = await graph.ainvoke(
+                    {"messages": list(self.history)},
+                    {"recursion_limit": 12},
+                )
                 self.history = result["messages"]
                 final = self.history[-1]
                 content = _extract_text(final)
                 log.info("STREAMER -> %s", (content or "").replace("\n", " ")[:240])
+                # ChatGPT Subscription (and similar) may not emit tool_calls —
+                # if the user asked for work, dispatch the Worker ourselves.
+                if allow_tools:
+                    await self._maybe_fallback_start_coding(hist_before)
                 return content
             except Exception as exc:  # pragma: no cover
                 last_exc = exc
@@ -410,6 +572,36 @@ class StreamerAgent:
         if last_exc:
             return f"(streamer error: {last_exc})"
         return ""
+
+    async def _maybe_fallback_start_coding(self, hist_before: int) -> None:
+        """If Worker was not actually started this turn, kick it from last user text."""
+        if self._worker_dispatched_for:
+            return
+        # Only treat start_coding as done if a ToolMessage reported ok.
+        new_msgs = self.history[hist_before:]
+        for m in new_msgs:
+            if getattr(m, "name", None) != "start_coding":
+                continue
+            raw = getattr(m, "content", "") or ""
+            try:
+                data = json.loads(raw) if isinstance(raw, str) else raw
+            except Exception:
+                data = {}
+            if isinstance(data, dict) and data.get("ok"):
+                return
+        last_user = self._last_user_task()
+        if not last_user or not _looks_like_task(last_user):
+            return
+        log.warning("STREAMER fallback: auto start_coding (no successful dispatch)")
+        self._worker_dispatched_for = last_user
+        await self.bus.publish("worker_task", last_user)
+        await self.controller.push_action(
+            kind="dispatch",
+            agent="streamer",
+            name="start_coding",
+            summary=f"fallback → worker: {last_user[:140]}",
+            detail={"task": last_user, "fallback": True},
+        )
 
 
 # ─── Worker ─────────────────────────────────────────────────────────────
@@ -458,11 +650,31 @@ class WorkerAgent:
         if key in self._graphs:
             return self._graphs[key]
         llm = self.router.llm(role)
-        self._graphs[key] = _build_graph(self.tools, llm)
+        controller = self.controller
+
+        async def on_tool(*, agent: str, name: str, args: dict, result: str) -> None:
+            await controller.push_action(
+                kind="tool",
+                agent=agent,
+                name=name,
+                summary=f"{name}({json.dumps(args, ensure_ascii=False, default=str)[:120]})",
+                detail={"args": args, "result": result},
+            )
+
+        self._graphs[key] = _build_graph(
+            self.tools, llm, agent_label="worker", on_tool=on_tool
+        )
         return self._graphs[key]
 
     async def run_task(self, task: str) -> str:
         log.info("WORKER <- task: %s", task)
+        await self.controller.push_action(
+            kind="worker",
+            agent="worker",
+            name="run_task",
+            summary=(task or "")[:160],
+            detail={"task": task},
+        )
         self.history.append(HumanMessage(content=task))
         self._last_report = ""
         last_exc: Exception | None = None
@@ -474,7 +686,10 @@ class WorkerAgent:
                 rc = self.router.get_role(role)
                 log.info("WORKER role=%s model=%s", role, rc.model)
                 graph = self._graph_for_role(role)
-                result = await graph.ainvoke({"messages": list(self.history)})
+                result = await graph.ainvoke(
+                    {"messages": list(self.history)},
+                    {"recursion_limit": 40},
+                )
                 self.history = result["messages"]
                 final = self.history[-1]
                 final_text = _extract_text(final)

@@ -133,3 +133,16 @@ def typing_delays(text: str) -> list[int]:
             base += random.randint(20, 50)
         delays.append(base)
     return delays
+
+
+def typing_delays_code(text: str) -> list[int]:
+    """Faster delays for long source dumps — still visibly animates."""
+    delays: list[int] = []
+    for ch in text:
+        if ch == "\n":
+            delays.append(random.randint(12, 28))
+        elif ch == " ":
+            delays.append(random.randint(4, 12))
+        else:
+            delays.append(random.randint(3, 10))
+    return delays

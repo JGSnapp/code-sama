@@ -70,6 +70,8 @@ class Provider:
     name: str
     base_url: str
     api_key: str
+    auth_mode: str = ""
+    refresh_token: str = ""
 
 
 @dataclass
@@ -212,6 +214,30 @@ class ModelRouter:
         cached = self._cache.get(key)
         if cached is not None:
             return cached
+
+        from . import chatgpt_subscription as cg
+
+        if cg.is_chatgpt_base(provider.base_url) or provider.auth_mode == "chatgpt":
+            from .chatgpt_llm import ChatGPTSubscriptionChat
+
+            settings = getattr(self, "_settings", None)
+
+            def _token() -> str:
+                if settings is not None:
+                    return cg.ensure_fresh_access(settings.get, settings.update, provider.name)
+                if provider.api_key:
+                    return provider.api_key
+                raise cg.ChatGPTReauthRequired("ChatGPT Subscription is not connected.")
+
+            client = ChatGPTSubscriptionChat(
+                token_fn=_token,
+                model=rc.model,
+                temperature=rc.temperature,
+                provider_name=provider.name,
+            )
+            self._cache[key] = client
+            return client
+
         from langchain_openai import ChatOpenAI
         kwargs: dict[str, Any] = {
             "model": rc.model,
@@ -230,9 +256,57 @@ class ModelRouter:
         return client
 
     def refresh(self) -> None:
-        """Drop cached clients. Call after editing ``models.yml``."""
+        """Drop cached clients. Call after editing ``models.yml`` / settings."""
         self._cache.clear()
         self._loaded = False
+
+    def apply_settings_llm(self, models_dict: dict[str, Any] | None) -> bool:
+        """Hot-load providers/roles from a settings-derived dict.
+
+        Returns True if the router was updated. Pass None to fall back to
+        models.yml / env on the next ``llm()`` call.
+        """
+        if not models_dict:
+            return False
+        providers_in = models_dict.get("providers") or {}
+        roles_in = models_dict.get("roles") or {}
+        if not providers_in or not roles_in:
+            return False
+        providers: dict[str, Provider] = {}
+        for name, spec in providers_in.items():
+            spec = spec or {}
+            providers[name] = Provider(
+                name=name,
+                base_url=str(spec.get("base_url") or ""),
+                api_key=str(spec.get("api_key") or ""),
+                auth_mode=str(spec.get("auth_mode") or ""),
+                refresh_token=str(spec.get("refresh_token") or ""),
+            )
+        roles: dict[str, RoleConfig] = {}
+        for role, spec in roles_in.items():
+            spec = spec or {}
+            provider = str(spec.get("provider") or "")
+            model = str(spec.get("model") or "")
+            if not provider or not model or provider not in providers:
+                continue
+            roles[role] = RoleConfig(
+                role=role,
+                provider=provider,
+                model=model,
+                temperature=float(spec.get("temperature", 0.4)),
+                max_tokens=spec.get("max_tokens"),
+            )
+        if not roles:
+            return False
+        self._providers = providers
+        self._roles = roles
+        self._cache.clear()
+        self._loaded = True
+        log.info(
+            "ModelRouter: applied settings — %d provider(s), %d role(s)",
+            len(providers), len(roles),
+        )
+        return True
 
 
 # ─── helpers ─────────────────────────────────────────────────────────────

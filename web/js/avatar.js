@@ -1,9 +1,14 @@
-// Real 3D VRM avatar with browser TTS + viseme-style lip-sync.
+// Real 3D VRM avatar with OmniVoice TTS (+ browser SpeechSynthesis fallback)
+// and viseme-style lip-sync.
 //
 // Fallback chain:
 //   1. AIKEYA_URL set → iframe the aikeya VRM viewer
 //   2. AVATAR_VRM_URL loads → render with Three.js + @pixiv/three-vrm
 //   3. anything fails → a friendly 2D canvas portrait keeps the panel alive
+//
+// Speech:
+//   1. POST /tts → local OmniVoice (clone from sample / voice design / auto)
+//   2. browser speechSynthesis if OmniVoice is down
 
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
@@ -30,9 +35,15 @@ export class Avatar {
     this._renderer = null;
     this._clock = null;
     this._lastFrame = performance.now();
+    this._cameraYOffset = 0;
+    this._cameraDistance = 1.45;
+    this._cameraFov = 24;
+    this._vrmUrl = null;
+    this._loopRunning = false;
   }
 
   configure(cfg) {
+    this.applyVisualSettings(cfg);
     if (cfg.aikeyaUrl) {
       this.iframe.src = cfg.aikeyaUrl;
       this.iframe.style.display = "block";
@@ -41,42 +52,156 @@ export class Avatar {
       this._startTts(cfg);
       return;
     }
-    this._initTHREE(cfg.avatarVrmUrl).then((ok) => {
-      if (!ok) this._startCanvasFallback();
-    });
+    const url = cfg.avatarVrmUrl;
+    if (url && url !== this._vrmUrl) {
+      this._initTHREE(url).then((ok) => {
+        if (!ok) this._startCanvasFallback();
+      });
+    } else if (this.vrm) {
+      this._reframe();
+    } else if (url) {
+      this._initTHREE(url).then((ok) => {
+        if (!ok) this._startCanvasFallback();
+      });
+    }
     this._startTts(cfg);
+  }
+
+  /** Live-apply camera / BG / voice / VRM from Settings without full reload. */
+  applyVisualSettings(cfg) {
+    if (cfg.cameraYOffset != null) this._cameraYOffset = Number(cfg.cameraYOffset);
+    if (cfg.cameraDistance != null) this._cameraDistance = Number(cfg.cameraDistance);
+    if (cfg.cameraFov != null) this._cameraFov = Number(cfg.cameraFov);
+    if (cfg.avatarBackground != null) this.setAvatarBackground(cfg.avatarBackground);
+    if (cfg.desktopWallpaper != null) this.setDesktopWallpaper(cfg.desktopWallpaper);
+    if (this.camera) this._reframe();
+    if (
+      cfg.ttsLang ||
+      cfg.ttsRate != null ||
+      cfg.ttsPitch != null ||
+      cfg.ttsVoiceName != null ||
+      cfg.ttsSampleUrl != null ||
+      cfg.ttsRefText != null ||
+      cfg.ttsInstruct != null ||
+      cfg.omnivoice != null
+    ) {
+      this._startTts({
+        ttsLang: cfg.ttsLang || this.tts?.lang,
+        ttsRate: cfg.ttsRate ?? this.tts?.rate,
+        ttsPitch: cfg.ttsPitch ?? this.tts?.pitch,
+        ttsVoiceName: cfg.ttsVoiceName ?? this.tts?.voiceName,
+        ttsSampleUrl: cfg.ttsSampleUrl ?? this.tts?.sampleUrl,
+        ttsRefText: cfg.ttsRefText ?? this.tts?.refText,
+        ttsInstruct: cfg.ttsInstruct ?? this.tts?.instruct,
+        omnivoice: cfg.omnivoice ?? this.tts?.omnivoice,
+      });
+    }
+    if (cfg.avatarVrmUrl && cfg.avatarVrmUrl !== this._vrmUrl && !cfg.aikeyaUrl) {
+      this._initTHREE(cfg.avatarVrmUrl).then((ok) => {
+        if (!ok) console.warn("[avatar] VRM reload failed");
+      });
+    }
+  }
+
+  setAvatarBackground(value) {
+    const frame = document.getElementById("cam-frame");
+    if (!frame) return;
+    if (!value || value === "default") {
+      frame.style.backgroundImage = "";
+      frame.style.backgroundColor = "";
+      frame.classList.remove("custom-bg");
+      return;
+    }
+    if (value.startsWith("#") || value.startsWith("rgb")) {
+      frame.style.backgroundImage = "none";
+      frame.style.backgroundColor = value;
+      frame.classList.add("custom-bg");
+      return;
+    }
+    frame.style.backgroundColor = "#110612";
+    frame.style.backgroundImage =
+      `radial-gradient(ellipse at 50% 60%, rgba(0,0,0,0) 30%, rgba(0,0,0,0.45) 100%),` +
+      `url("${value}") center center / cover no-repeat`;
+    frame.classList.add("custom-bg");
+  }
+
+  setDesktopWallpaper(value) {
+    const desk = document.querySelector(".desktop");
+    if (!desk) return;
+    if (!value || value === "default") {
+      desk.style.backgroundImage = "";
+      desk.style.backgroundColor = "";
+      desk.classList.remove("custom-wallpaper");
+      return;
+    }
+    if (value.startsWith("#") || value.startsWith("rgb")) {
+      desk.style.backgroundImage = "none";
+      desk.style.backgroundColor = value;
+      desk.classList.add("custom-wallpaper");
+      return;
+    }
+    desk.style.backgroundColor = "#066";
+    desk.style.backgroundImage = `url("${value}")`;
+    desk.style.backgroundSize = "cover";
+    desk.style.backgroundPosition = "center";
+    desk.classList.add("custom-wallpaper");
+  }
+
+  listVoices() {
+    if (!("speechSynthesis" in window)) return [];
+    return speechSynthesis.getVoices().map((v) => ({
+      name: v.name,
+      lang: v.lang,
+      default: v.default,
+    }));
   }
 
   // ─── TTS ────────────────────────────────────────────
   _startTts(cfg) {
-    if (!("speechSynthesis" in window)) {
-      console.warn("[avatar] speechSynthesis not supported in this browser");
-      return;
-    }
     this.tts = {
       lang: cfg.ttsLang || "ru-RU",
-      rate: cfg.ttsRate || 1.0,
-      pitch: cfg.ttsPitch || 1.0,
+      rate: cfg.ttsRate ?? 1.0,
+      pitch: cfg.ttsPitch ?? 1.0,
+      voiceName: cfg.ttsVoiceName || "",
+      sampleUrl: cfg.ttsSampleUrl || "",
+      refText: cfg.ttsRefText || "",
+      instruct: cfg.ttsInstruct || "",
+      omnivoice: cfg.omnivoice || null,
       voice: null,
+      langOverride: null,
     };
+    this._stopSpeak();
+    if (!("speechSynthesis" in window)) {
+      console.warn("[avatar] speechSynthesis not supported — OmniVoice only");
+      return;
+    }
     const pickVoice = () => {
       const voices = speechSynthesis.getVoices();
       const want = this.tts.lang;
       const family = want.split("-")[0];
-      const exact = voices.find((v) => v.lang === want);
-      const fam = voices.find((v) => v.lang.startsWith(family));
-      const female = voices.find((v) => /female|google|samantha|alice|milena|microsoft\s+(zira|hazel|anna|svetlana|irina)/i.test(v.name));
-      this.tts.voice = exact || fam || female || voices[0] || null;
-      // If we have voices but none in the requested language, drop the lang
-      // hint so the chosen voice actually plays instead of silently failing.
-      this.tts.langOverride = (exact || fam) ? want : (this.tts.voice ? this.tts.voice.lang : null);
+      let picked = null;
+      if (this.tts.voiceName) {
+        picked = voices.find((v) => v.name === this.tts.voiceName) || null;
+      }
+      if (!picked) {
+        const exact = voices.find((v) => v.lang === want);
+        const fam = voices.find((v) => v.lang.startsWith(family));
+        const female = voices.find((v) => /female|google|samantha|alice|milena|microsoft\s+(zira|hazel|anna|svetlana|irina)/i.test(v.name));
+        picked = exact || fam || female || voices[0] || null;
+      }
+      this.tts.voice = picked;
+      this.tts.langOverride = picked ? picked.lang : want;
       console.info(
         "[avatar] tts voice picked:",
         this.tts.voice ? `${this.tts.voice.name} (${this.tts.voice.lang})` : "<none>",
         "for requested",
         want,
         "— total voices:",
-        voices.length
+        voices.length,
+        "omnivoice:",
+        this.tts.omnivoice?.enabled ? "on" : "off",
+        "sample:",
+        this.tts.sampleUrl || "<none>"
       );
     };
     pickVoice();
@@ -85,42 +210,134 @@ export class Avatar {
     }
   }
 
-  speak(text) {
-    if (!this.tts || !("speechSynthesis" in window) || !text) return;
+  _stopSpeak() {
+    if (this._visemeTimer) {
+      clearInterval(this._visemeTimer);
+      this._visemeTimer = null;
+    }
+    if (this._speakSafety) {
+      clearTimeout(this._speakSafety);
+      this._speakSafety = null;
+    }
+    if (this._audioEl) {
+      try {
+        this._audioEl.pause();
+        this._audioEl.src = "";
+      } catch (_) { /* ignore */ }
+      this._audioEl = null;
+    }
+    if (this._audioUrl) {
+      URL.revokeObjectURL(this._audioUrl);
+      this._audioUrl = null;
+    }
+    if ("speechSynthesis" in window) {
+      try { speechSynthesis.cancel(); } catch (_) { /* ignore */ }
+    }
+    this.mouthTarget = 0;
+  }
+
+  _beginVisemes(text) {
+    this._showCaption(text);
+    const rollViseme = () => {
+      this.viseme = VISEMES[(Math.random() * VISEMES.length) | 0];
+      this.mouthTarget = 0.4 + Math.random() * 0.5;
+    };
+    rollViseme();
+    this._visemeTimer = setInterval(rollViseme, 110 + Math.random() * 60);
+  }
+
+  _endVisemes() {
+    if (this._visemeTimer) {
+      clearInterval(this._visemeTimer);
+      this._visemeTimer = null;
+    }
+    this.mouthTarget = 0;
+    setTimeout(() => this._hideCaption(), 600);
+  }
+
+  /** Prefer OmniVoice (/tts); fall back to browser SpeechSynthesis. */
+  async speak(text) {
+    if (!text) return;
+    this._stopSpeak();
+    const wantOmni = this.tts?.omnivoice?.enabled !== false;
+    if (wantOmni) {
+      try {
+        await this._speakOmni(text);
+        return;
+      } catch (e) {
+        console.warn("[avatar] OmniVoice failed, falling back to speechSynthesis", e);
+      }
+    }
+    this._speakBrowser(text);
+  }
+
+  async _speakOmni(text) {
+    if (!this.tts) this._startTts({});
+    console.info("[avatar] OmniVoice speak:", text.slice(0, 80));
+    const res = await fetch("/tts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        text,
+        sampleUrl: this.tts.sampleUrl || "",
+        refText: this.tts.refText || "",
+        instruct: this.tts.instruct || "",
+        language: this.tts.lang || "ru-RU",
+        speed: this.tts.rate ?? 1,
+      }),
+    });
+    if (!res.ok) {
+      let detail = "";
+      try {
+        const body = await res.json();
+        detail = body.error || JSON.stringify(body);
+      } catch (_) {
+        detail = await res.text();
+      }
+      throw new Error(`TTS ${res.status}: ${detail}`);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    this._audioUrl = url;
+    const audio = new Audio(url);
+    this._audioEl = audio;
+    this._beginVisemes(text);
+    const ttl = Math.max(2000, text.length * 90);
+    this._speakSafety = setTimeout(() => this._endVisemes(), ttl + 8000);
+    await new Promise((resolve, reject) => {
+      audio.onended = () => {
+        this._endVisemes();
+        resolve();
+      };
+      audio.onerror = () => {
+        this._endVisemes();
+        reject(new Error("audio playback failed"));
+      };
+      audio.play().catch(reject);
+    });
+  }
+
+  _speakBrowser(text) {
+    if (!this.tts || !("speechSynthesis" in window)) return;
     try {
-      speechSynthesis.cancel();
       const u = new SpeechSynthesisUtterance(text);
-      // Use the language of the actually-picked voice, not the configured
-      // one — otherwise some browsers refuse to play if the lang doesn't
-      // match any installed voice.
       u.lang = this.tts.langOverride || this.tts.lang;
       u.rate = this.tts.rate;
       u.pitch = this.tts.pitch;
       if (this.tts.voice) u.voice = this.tts.voice;
-      console.info("[avatar] speak:", text.slice(0, 80));
+      console.info("[avatar] browser speak:", text.slice(0, 80));
       const ttl = Math.max(800, text.length * 70);
       let speaking = true;
-      let visemeTimer = null;
-      const rollViseme = () => {
-        this.viseme = VISEMES[(Math.random() * VISEMES.length) | 0];
-        this.mouthTarget = 0.4 + Math.random() * 0.5;
-      };
-      u.onstart = () => {
-        this._showCaption(text);
-        rollViseme();
-        visemeTimer = setInterval(rollViseme, 110 + Math.random() * 60);
-      };
+      u.onstart = () => this._beginVisemes(text);
       const stop = () => {
+        if (!speaking) return;
         speaking = false;
-        clearInterval(visemeTimer);
-        this.mouthTarget = 0;
-        setTimeout(() => this._hideCaption(), 600);
+        this._endVisemes();
       };
       u.onend = stop;
       u.onerror = stop;
       speechSynthesis.speak(u);
-      // safety: some voices never fire onend
-      setTimeout(() => { if (speaking) stop(); }, ttl + 4000);
+      this._speakSafety = setTimeout(() => { if (speaking) stop(); }, ttl + 4000);
     } catch (e) { console.warn("TTS error", e); }
   }
 
@@ -142,14 +359,20 @@ export class Avatar {
   // ─── 3D VRM ────────────────────────────────────────
   async _initTHREE(url) {
     try {
+      this._disposeScene();
+      this._vrmUrl = url;
+      this.host3d.style.display = "";
+      this.canvas.style.display = "none";
+
       const scene = new THREE.Scene();
-      const camera = new THREE.PerspectiveCamera(16, 4 / 3, 0.05, 50);
-      camera.position.set(0, 1.40, 1.4);
-      camera.lookAt(0, 1.38, 0);
+      const camera = new THREE.PerspectiveCamera(this._cameraFov || 24, 4 / 3, 0.05, 50);
+      camera.position.set(0, 1.25, this._cameraDistance || 1.45);
+      camera.lookAt(0, 1.25, 0);
 
       const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       this._sizeRenderer(renderer);
+      this.host3d.innerHTML = "";
       this.host3d.appendChild(renderer.domElement);
       this._renderer = renderer;
 
@@ -171,90 +394,56 @@ export class Avatar {
       }
       const vrm = gltf.userData?.vrm;
       if (!vrm) return false;
-      VRMUtils.removeUnnecessaryVertices?.(vrm.scene);
-      VRMUtils.combineSkeletons?.(vrm.scene);
+      // Do NOT call combineSkeletons here — it can leave the mesh stuck in
+      // the bind T-pose while bones move underneath.
       vrm.scene.traverse((o) => { if (o.isMesh) o.frustumCulled = false; });
-      // VRM 1.0 models face +Z by default, VRM 0.x are auto-rotated by
-      // three-vrm. We let three-vrm pick the right orientation and just
-      // place the camera in front of the avatar (negative Z, looking +Z).
+      VRMUtils.rotateVRM0?.(vrm);
+
       vrm.scene.position.y = 0;
       scene.add(vrm.scene);
       this.vrm = vrm;
       this.scene = scene;
       this.camera = camera;
 
-      // Default T-pose looks weird in a "webcam" framing. Force arms into a
-      // relaxed A-pose. We re-apply this every frame in _tick because
-      // vrm.update() copies normalized bone rotations onto the raw bones.
-      this._pose = null;
+      this._armDown = 1.35;
+      this._armSign = 1;
+      this._poseCalibrated = false;
 
-      // List of bones we want collapsed for the webcam crop. Re-applied
-      // every frame in _tick because vrm.update() resets bone transforms.
-      this._collapseBones = [
-        "leftShoulder", "rightShoulder",
-        "leftUpperArm", "rightUpperArm",
-        "leftLowerArm", "rightLowerArm",
-        "leftHand", "rightHand",
-      ];
+      this._applyAPose();
+      this.vrm.update(0);
+      this._calibrateArmSign();
+      this._applyAPose();
+      this.vrm.update(0);
 
-      // Hide meshes likely to be arm-related so the webcam shot stays clean.
-      // Two passes:
-      //   • Names matching "arm/sleeve/glove/shoulder/pauldron/hand/wrist"
-      //   • Skinned meshes whose local bounding box extends past ±0.30m
-      //     horizontally (T-pose arms always do; centered-torso meshes don't)
-      //     AND that aren't part of the head/hair group.
-      const HIDE_PATTERNS = /(arm|sleeve|glove|shoulder|pauldron|hand|wrist)/i;
-      const KEEP_PATTERNS = /(head|hair|face|eye|brow|mouth|tongue|tooth|ear|neck|chest|torso|body)/i;
-      try {
-        vrm.scene.traverse((obj) => {
-          const n = obj.name || "";
-          if (HIDE_PATTERNS.test(n) && !KEEP_PATTERNS.test(n)) {
-            obj.visible = false;
-            return;
+      this._reframe();
+
+      console.info(
+        "[avatar] VRM ready",
+        "meta=", vrm.meta?.metaVersion ?? vrm.meta?.version,
+        "armSign=", this._armSign,
+        "bones=", ["leftUpperArm", "rightUpperArm"].map(
+          (n) => `${n}:${!!vrm.humanoid?.getNormalizedBoneNode?.(n)}`
+        ).join(" ")
+      );
+
+      if (!this._ro) {
+        this._ro = new ResizeObserver(() => this._sizeRenderer(renderer));
+        this._ro.observe(this.host3d);
+      }
+
+      if (!this._loopRunning) {
+        this._loopRunning = true;
+        const clock = new THREE.Clock();
+        const loop = () => {
+          const dt = clock.getDelta();
+          this._tick(dt);
+          if (this._renderer && this.scene && this.camera) {
+            this._renderer.render(this.scene, this.camera);
           }
-          if (obj.isSkinnedMesh && !KEEP_PATTERNS.test(n)) {
-            obj.geometry?.computeBoundingBox?.();
-            const bb = obj.geometry?.boundingBox;
-            if (!bb) return;
-            const extent = Math.max(Math.abs(bb.min.x), Math.abs(bb.max.x));
-            // The torso clothing mostly stays inside ±0.20; pure arm/sleeve
-            // meshes extend past 0.30. We hide ONLY the high-X half by
-            // setting a clip plane indirectly — simplest: just hide the
-            // whole mesh when it extends well past the shoulder line.
-            if (extent > 0.32) {
-              obj.visible = false;
-            }
-          }
-        });
-      } catch (e) { /* ignore */ }
-
-      // Auto-frame: aim the camera in front of the head bone, close enough
-      // that the arms (still in T-pose) are out of frame on the sides.
-      try {
-        const head = vrm.humanoid?.getNormalizedBoneNode?.("head");
-        if (head) {
-          const wp = new THREE.Vector3();
-          head.getWorldPosition(wp);
-          // Webcam framing — head + shoulders, ~50% of the panel. Arms are
-          // collapsed (see _initTHREE) so we don't worry about FOV here.
-          camera.position.set(wp.x, wp.y + 0.07, wp.z + 1.4);
-          camera.lookAt(wp.x, wp.y + 0.05, wp.z);
-          this._headWorldY = wp.y;
-        }
-      } catch (e) { /* ignore */ }
-
-      // Resize handling.
-      const ro = new ResizeObserver(() => this._sizeRenderer(renderer));
-      ro.observe(this.host3d);
-
-      const clock = new THREE.Clock();
-      const loop = () => {
-        const dt = clock.getDelta();
-        this._tick(dt);
-        renderer.render(scene, camera);
+          requestAnimationFrame(loop);
+        };
         requestAnimationFrame(loop);
-      };
-      requestAnimationFrame(loop);
+      }
       return true;
     } catch (e) {
       console.warn("Three init failed", e);
@@ -262,10 +451,113 @@ export class Avatar {
     }
   }
 
+  _disposeScene() {
+    if (this.vrm) {
+      try { this.scene?.remove(this.vrm.scene); } catch (_) { /* ignore */ }
+      this.vrm = null;
+    }
+    if (this._renderer) {
+      try { this._renderer.dispose(); } catch (_) { /* ignore */ }
+      this._renderer = null;
+    }
+    this.scene = null;
+    this.camera = null;
+  }
+
+  _reframe() {
+    if (!this.camera || !this.vrm) return;
+    try {
+      const yOff = this._cameraYOffset ?? 0;
+      // Measure framing with the model at y=0, then slide the character.
+      // If we measure after moving, lookAt tracks the offset and the slider
+      // appears to do nothing.
+      this.vrm.scene.position.y = 0;
+      this.vrm.scene.updateMatrixWorld(true);
+
+      const hum = this.vrm.humanoid;
+      const head = hum?.getNormalizedBoneNode?.("head");
+      const chest =
+        hum?.getNormalizedBoneNode?.("upperChest") ||
+        hum?.getNormalizedBoneNode?.("chest") ||
+        hum?.getNormalizedBoneNode?.("spine");
+      if (!head) {
+        this.vrm.scene.position.y = yOff;
+        return;
+      }
+      const headPos = new THREE.Vector3();
+      const chestPos = new THREE.Vector3();
+      head.getWorldPosition(headPos);
+      if (chest) chest.getWorldPosition(chestPos);
+      else chestPos.set(headPos.x, headPos.y - 0.28, headPos.z);
+
+      const focus = headPos.clone().lerp(chestPos, 0.45);
+      const dist = this._cameraDistance ?? 1.45;
+      this.camera.fov = this._cameraFov ?? 24;
+      this.camera.position.set(focus.x, focus.y, focus.z + dist);
+      this.camera.lookAt(focus.x, focus.y, focus.z);
+      this.camera.updateProjectionMatrix();
+
+      this.vrm.scene.position.y = yOff;
+      this.vrm.scene.updateMatrixWorld(true);
+      this._headWorldY = headPos.y + yOff;
+      this._focusY = focus.y;
+    } catch (e) { /* ignore */ }
+  }
+
+  _setBoneEuler(name, x, y, z) {
+    const hum = this.vrm?.humanoid;
+    if (!hum) return;
+    const node = hum.getNormalizedBoneNode?.(name);
+    if (!node) return;
+    node.rotation.set(x, y, z);
+    // Force quaternion sync in case a consumer reads quaternion directly.
+    node.quaternion.setFromEuler(node.rotation);
+  }
+
+  _applyAPose() {
+    if (!this.vrm?.humanoid) return;
+    const s = this._armSign || 1;
+    const down = this._armDown || 1.35;
+    // Common three-vrm convention: left +Z / right -Z brings arms down.
+    // `_armSign` flips both if calibration finds the opposite convention.
+    this._setBoneEuler("leftUpperArm", 0.05, 0.08, s * down);
+    this._setBoneEuler("rightUpperArm", 0.05, -0.08, -s * down);
+    this._setBoneEuler("leftLowerArm", 0.1, -0.2, s * 0.15);
+    this._setBoneEuler("rightLowerArm", 0.1, 0.2, -s * 0.15);
+    this._setBoneEuler("leftHand", 0, 0, s * 0.05);
+    this._setBoneEuler("rightHand", 0, 0, -s * 0.05);
+    this._setBoneEuler("leftShoulder", 0, 0, s * 0.05);
+    this._setBoneEuler("rightShoulder", 0, 0, -s * 0.05);
+  }
+
+  _calibrateArmSign() {
+    if (this._poseCalibrated || !this.vrm?.humanoid) return;
+    const leftHand = this.vrm.humanoid.getNormalizedBoneNode?.("leftHand");
+    const head = this.vrm.humanoid.getNormalizedBoneNode?.("head");
+    if (!leftHand || !head) {
+      this._poseCalibrated = true;
+      return;
+    }
+    const hand = new THREE.Vector3();
+    const hd = new THREE.Vector3();
+    leftHand.getWorldPosition(hand);
+    head.getWorldPosition(hd);
+    // In a correct A-pose the hand sits below the head. If it's above,
+    // we rotated the wrong way — flip and re-apply next frame.
+    if (hand.y > hd.y - 0.05) {
+      this._armSign = -(this._armSign || 1);
+      console.info("[avatar] arm sign flipped →", this._armSign, "handY=", hand.y.toFixed(3), "headY=", hd.y.toFixed(3));
+    } else {
+      console.info("[avatar] arm pose OK handY=", hand.y.toFixed(3), "headY=", hd.y.toFixed(3));
+    }
+    this._poseCalibrated = true;
+  }
+
   _sizeRenderer(renderer) {
     const r = this.host3d.getBoundingClientRect();
-    if (r.width > 0 && r.height > 0) {
-      renderer.setSize(r.width, r.height, false);
+    const rend = renderer || this._renderer;
+    if (r.width > 0 && r.height > 0 && rend) {
+      rend.setSize(r.width, r.height, false);
       if (this.camera) {
         this.camera.aspect = r.width / r.height;
         this.camera.updateProjectionMatrix();
@@ -307,28 +599,30 @@ export class Avatar {
     }
 
     if (this.vrm) {
-      // Re-apply any pose offsets each frame so vrm.update doesn't
-      // snap them back to the rest pose.
-      if (this._pose) {
-        const hum = this.vrm.humanoid;
-        for (const [name, rot] of Object.entries(this._pose)) {
-          const node = hum?.getNormalizedBoneNode?.(name);
-          if (!node) continue;
-          if (rot.x !== undefined) node.rotation.x = rot.x;
-          if (rot.y !== undefined) node.rotation.y = rot.y;
-          if (rot.z !== undefined) node.rotation.z = rot.z;
+      const hum = this.vrm.humanoid;
+
+      // A-pose first, then idle overlays on spine/head.
+      this._applyAPose();
+
+      if (hum) {
+        const spine = hum.getNormalizedBoneNode?.("spine");
+        if (spine) {
+          spine.rotation.x = Math.sin(this.t * 1.6) * 0.012;
+          spine.quaternion.setFromEuler(spine.rotation);
+        }
+        const head = hum.getNormalizedBoneNode?.("head");
+        if (head) {
+          head.rotation.x = (this._headPitch ?? 0) + Math.sin(this.t * 0.9) * 0.018;
+          head.rotation.y = (this._headYaw   ?? 0) + Math.sin(this.t * 0.6) * 0.025;
+          head.rotation.z = (this._headRoll  ?? 0) + Math.sin(this.t * 0.45) * 0.015;
+          head.quaternion.setFromEuler(head.rotation);
         }
       }
-      // Re-collapse arm bones EVERY frame so vrm.update can't restore
-      // them. Costs about a dozen Vector3 writes — cheap.
-      if (this._collapseBones) {
-        const hum = this.vrm.humanoid;
-        for (const n of this._collapseBones) {
-          const node = hum?.getNormalizedBoneNode?.(n);
-          if (node) node.scale.set(0.001, 0.001, 0.001);
-        }
-      }
+
       this.vrm.update(dt);
+
+      if (!this._poseCalibrated) this._calibrateArmSign();
+
       const em = this.vrm.expressionManager;
       if (em) {
         for (const v of VISEMES) em.setValue(v, v === this.viseme ? this.mouthValue : 0);
@@ -344,19 +638,6 @@ export class Avatar {
         // Layered idle smile so she doesn't look bored.
         em.setValue("happy", Math.max(em.getValue?.("happy") || 0, this._smileIdle || 0));
         if (this.mood === "thinking") em.setValue("happy", 0.18);
-      }
-      // Breathe / idle sway + head movements toward the smoothed targets.
-      const hum = this.vrm.humanoid;
-      if (hum) {
-        const spine = hum.getNormalizedBoneNode?.("spine");
-        if (spine) spine.rotation.x = Math.sin(this.t * 1.6) * 0.012;
-        const head = hum.getNormalizedBoneNode?.("head");
-        if (head) {
-          // micro tremor + smoothed pose target
-          head.rotation.x = (this._headPitch ?? 0) + Math.sin(this.t * 0.9) * 0.018;
-          head.rotation.y = (this._headYaw   ?? 0) + Math.sin(this.t * 0.6) * 0.025;
-          head.rotation.z = (this._headRoll  ?? 0) + Math.sin(this.t * 0.45) * 0.015;
-        }
       }
     }
   }

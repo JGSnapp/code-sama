@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <title>code-sama-os</title>
   <meta name="viewport" content="width=1480, initial-scale=1" />
-  <link rel="stylesheet" href="/css/style.css" />
+  <link rel="stylesheet" href="/css/style.css?v=chrome8" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
@@ -12,6 +12,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/htmlmixed/htmlmixed.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/xml/xml.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/css/css.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <script type="importmap">
   {
     "imports": {
@@ -23,19 +24,25 @@
   </script>
 </head>
 <body>
+  <div id="chrome-btns">
+    <button type="button" id="btn-settings-chrome" title="Настройки" aria-label="Открыть настройки">
+      <span class="gear-glyph" aria-hidden="true"></span>
+      <span class="gear-label">Настройки</span>
+    </button>
+    <button type="button" id="btn-actionlog-chrome" title="Журнал действий" aria-label="Журнал действий">
+      <span class="chrome-glyph alog-glyph" aria-hidden="true"></span>
+      <span class="gear-label">Журнал</span>
+    </button>
+    <button type="button" id="btn-wiki-chrome" title="Инфо / вики" aria-label="Инфо">
+      <span class="chrome-glyph info-glyph" aria-hidden="true"></span>
+      <span class="gear-label">Инфо</span>
+    </button>
+  </div>
   <div id="layout">
     <div id="os-wrap">
       <div id="os" class="os">
         <div id="desktop" class="desktop">
-          <div class="desk-icons">
-            <div class="desk-icon"><div class="ico ico-mycomputer"></div><span>My Computer</span></div>
-            <div class="desk-icon"><div class="ico ico-recycle"></div><span>Recycle Bin</span></div>
-            <div class="desk-icon"><div class="ico ico-browser"></div><span>Internet</span></div>
-            <div class="desk-icon"><div class="ico ico-editor"></div><span>Notepad++</span></div>
-            <div class="desk-icon"><div class="ico ico-paint"></div><span>Paint</span></div>
-            <div class="desk-icon"><div class="ico ico-music"></div><span>Media Player</span></div>
-            <div class="desk-icon"><div class="ico ico-tracker"></div><span>Task Tracker</span></div>
-          </div>
+        <div class="desk-icons" id="desk-icons"></div>
         </div>
         <div id="windows"></div>
         <div id="start-menu" aria-hidden="true">
@@ -88,9 +95,16 @@
           </div>
         </div>
         <div id="cam-label">Agent Webcam<span id="status-dot"></span><small id="status-text">idle</small></div>
+        <div id="last-action" title="Последнее действие Worker / tool">
+          <span class="la-label">действие</span>
+          <span class="la-text" id="last-action-text">—</span>
+        </div>
       </div>
       <div id="chat">
-        <div id="chat-head">code-sama agent</div>
+        <div id="chat-head">
+          <span>code-sama agent</span>
+          <button type="button" id="btn-settings" title="Настройки" aria-label="Настройки">⚙</button>
+        </div>
         <div id="chat-log"></div>
         <form id="chat-form" autocomplete="off">
           <input id="chat-input" placeholder="Опиши задачу — агент сделает её внутри ОС…" />
@@ -100,6 +114,28 @@
     </aside>
   </div>
 
-  <script type="module" src="/js/main.js"></script>
+  <div id="settings-backdrop" aria-hidden="true"></div>
+  <div id="settings-window" role="dialog" aria-modal="true" aria-label="Настройки"></div>
+
+  <div id="actionlog-backdrop" aria-hidden="true"></div>
+  <div id="actionlog-window" role="dialog" aria-modal="true" aria-label="Журнал действий">
+    <div class="alog-title">
+      <span>Журнал действий</span>
+      <button type="button" id="actionlog-close" class="win-btn">×</button>
+    </div>
+    <div id="actionlog-list"></div>
+  </div>
+
+  <div id="wiki-backdrop" aria-hidden="true"></div>
+  <div id="wiki-window" role="dialog" aria-modal="true" aria-label="Инфо">
+    <div class="wiki-title">
+      <span>Инфо · code-sama wiki</span>
+      <button type="button" id="wiki-close" class="win-btn">×</button>
+    </div>
+    <div id="wiki-tabs"></div>
+    <div id="wiki-body"></div>
+  </div>
+
+  <script type="module" src="/js/main.js?v=chrome8"></script>
 </body>
 </html>

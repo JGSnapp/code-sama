@@ -24,9 +24,33 @@ empty).
 
 Then open <http://127.0.0.1:8765>.
 
-The first start creates `.venv`, installs the Python deps, installs Playwright
-Chromium, and copies `.env.example` → `.env`. Drop your ProxyAPI key into
-`.env` (same key shape as `api_example.py`).
+### Recommended: Docker (Linux isolation)
+
+This is the intended mode. The agent server runs **inside a Linux container**
+with Xvfb — real GUI apps and Python cannot open windows on your Windows
+desktop.
+
+```powershell
+.\run-docker.ps1          # build + start
+.\run-docker.ps1 -Logs    # follow logs
+.\run-docker.ps1 -Down    # stop
+```
+
+Or just `.\run.ps1` — it auto-picks Docker when the engine is running.
+Use `.\run.ps1 -Local` only for quick host-only debugging (no Linux broker).
+
+The first Docker start builds the image (Xvfb, xdotool, ffmpeg, Playwright,
+demo X11 apps). Drop API keys into `.env` (copied from `.env.example`).
+
+### Local venv (no isolation)
+
+```powershell
+./run.ps1 -Local
+```
+
+Then open <http://127.0.0.1:8765>.
+In this mode `Linux broker unavailable` is expected — sandbox GUI blocks
+still apply, but there is no separate Linux desktop.
 
 ## Architecture
 

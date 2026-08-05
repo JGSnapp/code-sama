@@ -37,7 +37,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         # the right button instead of guessed pixels.
         at-spi2-core python3-gi gir1.2-atspi-2.0 \
         # demo GUI apps so we can show off the wiring out of the box
-        x11-apps xterm xcalc \
+        # (xcalc is part of x11-apps on bookworm — don't list it separately)
+        x11-apps xterm \
         # general dev toolchain available to code-sama
         build-essential git make cmake pkg-config \
         curl wget jq vim nano \
@@ -67,21 +68,28 @@ COPY server /opt/code-sama/server
 COPY web    /opt/code-sama/web
 COPY tools  /opt/code-sama/tools
 COPY apps   /opt/code-sama/apps
-COPY HARNESS.md /opt/code-sama/HARNESS.md
+COPY docs   /opt/code-sama/docs
+COPY characters /opt/code-sama/characters
+COPY HARNESS.md README.md Code-sama-architecture.md old_vision.md /opt/code-sama/
 COPY .env.example /opt/code-sama/.env.example
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
 
 # Persistent workspace for code-sama's own projects + installed app
 # manifests. The loader writes generated manifests under
 # /workspace/apps/generated/ so they survive container rebuilds.
-RUN mkdir -p /workspace/apps && chmod -R 0777 /workspace
+RUN mkdir -p /workspace/apps /opt/code-sama/uploads /opt/code-sama/logs \
+ && chmod -R 0777 /workspace /opt/code-sama/uploads /opt/code-sama/logs
 
 EXPOSE 8765
 ENV HOST=0.0.0.0 \
     PORT=8765 \
     BROWSER_HEADLESS=true \
     WORKSPACE_DIR=/workspace \
+    LINUX_CAPTURE=ffmpeg \
     XAUTHORITY=/tmp/.Xauth
 
 # Each Linux app gets its own Xvfb on a high display id, managed by
 # server/linux_broker.py at runtime. We do NOT start one here.
+ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["python", "-m", "uvicorn", "server.main:app", "--host", "0.0.0.0", "--port", "8765"]

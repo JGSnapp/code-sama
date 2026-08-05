@@ -11,12 +11,13 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import random
 import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
-from .cursor import plan_path, typing_delays
+from .cursor import plan_path, typing_delays, typing_delays_code
 
 
 CANVAS_W = 1024
@@ -32,11 +33,15 @@ APP_DEFAULTS: dict[str, dict[str, Any]] = {
     },
     "editor": {
         "filename": "untitled.py",
+        "path": "projects/scratch/untitled.py",
         "content": "",
         "caret": 0,
         "language": "python",
         "terminal_open": False,
         "terminal_lines": [],  # list of {kind: "cmd"|"out"|"err"|"info", text: str}
+        "project": "projects/scratch",
+        "open_files": ["projects/scratch/untitled.py"],
+        "tree": [],  # [{name, path, kind: "file"|"dir"}]
     },
     "paint": {
         "strokes": [],  # list of {color, size, points: [[x,y]...]}
@@ -55,16 +60,18 @@ APP_DEFAULTS: dict[str, dict[str, Any]] = {
         "tasks": [],  # list of {id, text, done}
     },
     "computer": {
-        "path": "C:\\",
-        "entries": [
-            {"name": "Program Files", "kind": "folder"},
-            {"name": "Windows", "kind": "folder"},
-            {"name": "Users", "kind": "folder"},
-            {"name": "Documents", "kind": "folder"},
-            {"name": "autoexec.bat", "kind": "doc"},
-            {"name": "config.sys", "kind": "doc"},
-            {"name": "readme.txt", "kind": "doc"},
-        ],
+        "path": "projects",
+        "entries": [],
+    },
+    "webgame": {
+        "title": "WebGame",
+        "html": "",
+        "keySeq": 0,
+        "keyName": "",
+        "keyType": "keydown",
+        "holdSeq": 0,
+        "holdKey": "",
+        "livePlay": None,
     },
     # Loader apps (any Linux program installed via the harness) register
     # as synthetic "linux" windows. The app_state is patched by the
@@ -89,8 +96,26 @@ WINDOW_TITLES = {
     "music": "Media Player",
     "tracker": "Task Tracker",
     "computer": "My Computer",
+    "webgame": "WebGame",
     "linux": "Linux App",
 }
+
+# Built-in desktop icons (left column). Dynamic shortcuts append after these.
+BUILTIN_DESKTOP_ICONS: list[dict[str, Any]] = [
+    {"id": "mycomputer", "label": "My Computer", "icon": "mycomputer", "app": "computer"},
+    {"id": "recycle", "label": "Recycle Bin", "icon": "recycle", "app": None},
+    {"id": "internet", "label": "Internet", "icon": "browser", "app": "browser"},
+    {"id": "notepad", "label": "Notepad++", "icon": "editor", "app": "editor"},
+    {"id": "paint", "label": "Paint", "icon": "paint", "app": "paint"},
+    {"id": "music", "label": "Media Player", "icon": "music", "app": "music"},
+    {"id": "tracker", "label": "Task Tracker", "icon": "tracker", "app": "tracker"},
+]
+
+# Icon grid geometry (must match .desk-icons CSS).
+DESK_ICON_ORIGIN_X = 8
+DESK_ICON_ORIGIN_Y = 8
+DESK_ICON_W = 76
+DESK_ICON_ROW = 92
 
 
 @dataclass
@@ -136,7 +161,17 @@ class OSController:
         self.chat_history: list[dict[str, str]] = []
         self.agent_status = "idle"
         self.mood = "neutral"
+        self.action_log: list[dict[str, Any]] = []
+        self.last_action: dict[str, Any] | None = None
+        self.desktop_icons: list[dict[str, Any]] = [
+            dict(ico) for ico in BUILTIN_DESKTOP_ICONS
+        ]
+        self.vfs: dict[str, str] = {"projects/": "", "projects/scratch/": "", "projects/scratch/untitled.py": "# scratch\n", "Documents/": ""}
+        self._type_follow_counter = 0
+        self._webgame_autopilot: asyncio.Task | None = None
+        self._shot_waiters: dict[str, asyncio.Future] = {}
         self._subscribers: set[asyncio.Queue] = set()
+        self._max_action_log = 200
         self._lock = asyncio.Lock()
 
     # ─── Subscriptions ────────────────────────────────────────────────────
@@ -169,6 +204,9 @@ class OSController:
             "chat": self.chat_history,
             "agentStatus": self.agent_status,
             "mood": self.mood,
+            "actionLog": self.action_log[-80:],
+            "lastAction": self.last_action,
+            "desktopIcons": list(self.desktop_icons),
         }
 
     # ─── Chat ─────────────────────────────────────────────────────────────
@@ -176,6 +214,40 @@ class OSController:
         msg = {"role": role, "content": content, "ts": time.time()}
         self.chat_history.append(msg)
         await self._emit({"type": "chat", "message": msg})
+        # Mirror chat into the action journal so the log shows dialogue too.
+        await self.push_action(
+            kind="chat",
+            agent="streamer" if role == "assistant" else "user",
+            summary=(content or "")[:160],
+            detail={"role": role, "content": content},
+        )
+
+    async def push_action(
+        self,
+        *,
+        kind: str,
+        agent: str = "",
+        name: str = "",
+        summary: str = "",
+        detail: dict[str, Any] | None = None,
+    ) -> None:
+        """Append an entry to the live action journal (tools / chats / status)."""
+        entry = {
+            "id": uuid.uuid4().hex[:10],
+            "ts": time.time(),
+            "kind": kind,
+            "agent": agent,
+            "name": name,
+            "summary": summary,
+            "detail": detail or {},
+        }
+        self.action_log.append(entry)
+        if len(self.action_log) > self._max_action_log:
+            self.action_log = self.action_log[-self._max_action_log:]
+        if kind in ("tool", "worker", "status", "dispatch"):
+            self.last_action = entry
+            await self._emit({"type": "lastAction", "action": entry})
+        await self._emit({"type": "actionLog", "entry": entry})
 
     async def set_agent_status(self, status: str) -> None:
         self.agent_status = status
@@ -218,16 +290,63 @@ class OSController:
             await self.focus_window(win.id)
 
     # ─── Typing ───────────────────────────────────────────────────────────
-    async def type_text(self, text: str) -> None:
+    async def type_text(self, text: str, *, pace: str = "normal") -> None:
         if not text:
+            return
+        if pace == "code":
+            await self._type_text_code(text)
             return
         delays = typing_delays(text)
         for ch, dly in zip(text, delays):
             await asyncio.sleep(dly / 1000.0)
             await self._apply_char(ch)
             await self._emit({"type": "keypress", "char": ch})
+            await self._maybe_follow_editor_caret()
 
-    async def press_key(self, key: str) -> None:
+    async def _type_text_code(self, text: str) -> None:
+        """Readable typing for source — slower than before, caret stays in view."""
+        # Per-char for moderate dumps; small chunks for long ones.
+        if len(text) <= 900:
+            delays = typing_delays_code(text)
+            # Scale code delays up ~2.5x so viewers can follow.
+            for ch, dly in zip(text, delays):
+                await asyncio.sleep(max(0.018, dly * 2.4 / 1000.0))
+                await self._apply_char(ch)
+                await self._emit({"type": "keypress", "char": ch})
+                await self._maybe_follow_editor_caret()
+            return
+        chunk = 5 if len(text) > 2500 else 3
+        i = 0
+        while i < len(text):
+            piece = text[i : i + chunk]
+            i += chunk
+            await asyncio.sleep(random.uniform(0.045, 0.085))
+            await self._apply_string(piece)
+            await self._emit({"type": "keypress", "char": piece[-1]})
+            await self._maybe_follow_editor_caret()
+
+    async def jump_cursor(self, x: float, y: float) -> None:
+        """Teleport cursor without path animation (for caret-follow)."""
+        x = max(2, min(self.canvas_w - 2, float(x)))
+        y = max(2, min(self.canvas_h - 2, float(y)))
+        self.cursor = [x, y]
+        await self._emit({"type": "cursorJump", "x": x, "y": y})
+
+    async def _maybe_follow_editor_caret(self) -> None:
+        """Keep the OS mouse inside the editor near the typing line."""
+        self._type_follow_counter += 1
+        if self._type_follow_counter % 40 != 0:
+            return
+        win = self.windows.get(self.focused_id or "")
+        if not win or win.app != "editor":
+            return
+        x = win.x + int(win.w * 0.55) + random.randint(-18, 18)
+        y = win.y + int(win.h * 0.62) + random.randint(-10, 10)
+        x = max(win.x + 90, min(win.x + win.w - 24, x))
+        y = max(win.y + 70, min(win.y + win.h - 50, y))
+        await self.jump_cursor(x, y)
+
+    async def press_key(self, key: str, *, pause: float = 0.08) -> None:
         await self._emit({"type": "key", "key": key})
         if self.focused_id and self.focused_target == "editor":
             win = self.windows.get(self.focused_id)
@@ -241,22 +360,52 @@ class OSController:
                     win.app_state["content"] = c[:-1]
                     win.app_state["caret"] = len(win.app_state["content"])
                     await self._emit({"type": "appState", "id": win.id, "state": win.app_state})
-        await asyncio.sleep(0.08)
+        # Forward keys into the in-OS HTML5 game iframe.
+        # Directions are HELD (arcade style); Space/Enter are taps.
+        if self.focused_id:
+            win = self.windows.get(self.focused_id)
+            if win and win.app == "webgame":
+                hold_keys = {
+                    "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown",
+                    "Left", "Right", "Up", "Down", "a", "d", "w", "s",
+                    "A", "D", "W", "S",
+                }
+                if key in hold_keys or key in {"", "Release", "None"}:
+                    seq = int(win.app_state.get("holdSeq") or 0) + 1
+                    await self.patch_app_state(win.id, {
+                        "holdSeq": seq,
+                        "holdKey": "" if key in {"", "Release", "None"} else key,
+                    })
+                else:
+                    seq = int(win.app_state.get("keySeq") or 0) + 1
+                    await self.patch_app_state(win.id, {
+                        "keySeq": seq,
+                        "keyName": key,
+                        "keyType": "keydown",
+                    })
+        if pause > 0:
+            await asyncio.sleep(pause)
 
     async def _apply_char(self, ch: str) -> None:
+        await self._apply_string(ch)
+
+    async def _apply_string(self, s: str) -> None:
         win = self.windows.get(self.focused_id or "")
-        if not win:
+        if not win or not s:
             return
         target = self.focused_target
         if win.app == "editor" and target == "editor":
-            win.app_state["content"] = (win.app_state.get("content", "") or "") + ch
+            win.app_state["content"] = (win.app_state.get("content", "") or "") + s
             win.app_state["caret"] = len(win.app_state["content"])
+            path = win.app_state.get("path") or win.app_state.get("filename")
+            if path:
+                self.vfs_write_silent(str(path), win.app_state["content"])
             await self._emit({"type": "appState", "id": win.id, "state": win.app_state})
         elif win.app == "browser" and target == "url":
-            win.app_state["url_draft"] = (win.app_state.get("url_draft", "") or "") + ch
+            win.app_state["url_draft"] = (win.app_state.get("url_draft", "") or "") + s
             await self._emit({"type": "appState", "id": win.id, "state": win.app_state})
         elif win.app == "tracker" and target == "tracker_input":
-            win.app_state["draft"] = (win.app_state.get("draft", "") or "") + ch
+            win.app_state["draft"] = (win.app_state.get("draft", "") or "") + s
             await self._emit({"type": "appState", "id": win.id, "state": win.app_state})
 
     # ─── Windows ──────────────────────────────────────────────────────────
@@ -300,20 +449,22 @@ class OSController:
                 return wid
         w = width or {
             "browser": 720,
-            "editor": 620,
+            "editor": 700,
             "paint": 560,
             "music": 360,
             "tracker": 360,
             "computer": 540,
+            "webgame": 1000,
             "linux": 800,
         }[app]
         h = height or {
             "browser": 500,
-            "editor": 420,
+            "editor": 520,
             "paint": 420,
             "music": 260,
             "tracker": 360,
             "computer": 360,
+            "webgame": 640,
             "linux": 540,
         }[app]
         wx, wy = self._next_slot(w, h)
@@ -341,6 +492,7 @@ class OSController:
             "paint": "canvas",
             "music": None,
             "computer": "path",
+            "webgame": "webgame",
             "linux": "canvas",
         }.get(app)
         await self._emit({"type": "windowOpen", "window": win.to_dict()})
@@ -386,6 +538,7 @@ class OSController:
                 "paint": "canvas",
                 "music": None,
                 "computer": "path",
+                "webgame": "webgame",
                 "linux": "canvas",
             }.get(w.app)
         self.focused_target = target
@@ -433,6 +586,17 @@ class OSController:
         w.maximized = not w.maximized
         await self._emit({"type": "windowMaximize", "id": window_id, "maximized": w.maximized})
 
+    async def ensure_maximized(self, window_id: str) -> None:
+        w = self.windows.get(window_id)
+        if not w:
+            return
+        if w.minimized:
+            w.minimized = False
+            await self._emit({"type": "windowRestore", "id": window_id})
+        if not w.maximized:
+            w.maximized = True
+            await self._emit({"type": "windowMaximize", "id": window_id, "maximized": True})
+
     # ─── App state mutations ─────────────────────────────────────────────
     async def patch_app_state(self, window_id: str, patch: dict[str, Any]) -> None:
         w = self.windows.get(window_id)
@@ -447,3 +611,209 @@ class OSController:
             if w.app == app:
                 return w
         return None
+
+    # ─── Desktop icons ────────────────────────────────────────────────────
+    def desk_icon_coords(self, index: int) -> tuple[int, int]:
+        """Center of the icon at the given 0-based column-row index."""
+        cx = DESK_ICON_ORIGIN_X + DESK_ICON_W // 2
+        cy = DESK_ICON_ORIGIN_Y + 22 + index * DESK_ICON_ROW
+        return cx, cy
+
+    def find_desktop_icon(self, id_or_label: str) -> tuple[int, dict[str, Any]] | None:
+        needle = (id_or_label or "").strip().lower()
+        if not needle:
+            return None
+        for i, ico in enumerate(self.desktop_icons):
+            if str(ico.get("id", "")).lower() == needle:
+                return i, ico
+            if str(ico.get("label", "")).lower() == needle:
+                return i, ico
+        return None
+
+    async def _emit_desktop_icons(self) -> None:
+        await self._emit({"type": "desktopIcons", "icons": list(self.desktop_icons)})
+
+    async def desktop_icon_add(
+        self,
+        label: str,
+        *,
+        app: str | None = "webgame",
+        icon: str = "game",
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        label = (label or "Shortcut").strip()[:40] or "Shortcut"
+        existing = self.find_desktop_icon(label)
+        if existing:
+            idx, ico = existing
+            ico = {
+                **ico,
+                "app": app,
+                "icon": icon or ico.get("icon") or "game",
+                "payload": payload or ico.get("payload") or {},
+            }
+            self.desktop_icons[idx] = ico
+            await self._emit_desktop_icons()
+            return {"ok": True, "id": ico["id"], "index": idx, "replaced": True}
+        ico_id = "ico_" + uuid.uuid4().hex[:8]
+        entry = {
+            "id": ico_id,
+            "label": label,
+            "icon": icon or "game",
+            "app": app,
+            "payload": payload or {},
+        }
+        self.desktop_icons.append(entry)
+        await self._emit_desktop_icons()
+        return {"ok": True, "id": ico_id, "index": len(self.desktop_icons) - 1, "replaced": False}
+
+    async def desktop_icon_click(self, id_or_label: str, *, double: bool = True) -> dict[str, Any]:
+        found = self.find_desktop_icon(id_or_label)
+        if not found:
+            return {"ok": False, "error": "icon_not_found"}
+        idx, ico = found
+        x, y = self.desk_icon_coords(idx)
+        await self.move_cursor(x, y)
+        await self.click(x, y)
+        if double:
+            await asyncio.sleep(0.12)
+            await self.click(x, y)
+        return {"ok": True, "id": ico["id"], "index": idx, "icon": ico}
+
+    async def stop_webgame_autopilot(self) -> None:
+        t = self._webgame_autopilot
+        self._webgame_autopilot = None
+        if t and not t.done():
+            t.cancel()
+            try:
+                await t
+            except (asyncio.CancelledError, Exception):
+                pass
+        win = self.find_window_by_app("webgame")
+        if win:
+            seq = int(win.app_state.get("holdSeq") or 0) + 1
+            await self.patch_app_state(win.id, {
+                "holdSeq": seq,
+                "holdKey": "",
+                "livePlay": None,
+            })
+
+    async def request_screenshot(self, *, target: str = "os", timeout: float = 6.0) -> str | None:
+        """Ask connected browsers for a JPEG of the OS canvas or webgame."""
+        if not self._subscribers:
+            return None
+        rid = uuid.uuid4().hex[:10]
+        loop = asyncio.get_running_loop()
+        fut: asyncio.Future = loop.create_future()
+        self._shot_waiters[rid] = fut
+        await self._emit({"type": "screenshotRequest", "id": rid, "target": target})
+        try:
+            return await asyncio.wait_for(fut, timeout=timeout)
+        except asyncio.TimeoutError:
+            return None
+        finally:
+            self._shot_waiters.pop(rid, None)
+
+    def fulfill_screenshot(self, request_id: str, image_b64: str | None) -> None:
+        fut = self._shot_waiters.get(request_id or "")
+        if fut and not fut.done():
+            fut.set_result(image_b64 or "")
+
+    # ─── Virtual filesystem ───────────────────────────────────────────────
+    @staticmethod
+    def vfs_norm(path: str) -> str:
+        p = (path or "").replace("\\", "/").strip()
+        while "//" in p:
+            p = p.replace("//", "/")
+        return p.strip("/")
+
+    def vfs_write_silent(self, path: str, content: str) -> str:
+        n = self.vfs_norm(path)
+        if not n or n.endswith("/"):
+            raise ValueError("invalid file path")
+        parts = n.split("/")
+        for i in range(1, len(parts)):
+            d = "/".join(parts[:i]) + "/"
+            self.vfs.setdefault(d, "")
+        self.vfs[n] = content if content is not None else ""
+        return n
+
+    def vfs_mkdir(self, path: str) -> str:
+        n = self.vfs_norm(path)
+        if not n:
+            return ""
+        parts = n.strip("/").split("/")
+        for i in range(1, len(parts) + 1):
+            d = "/".join(parts[:i]) + "/"
+            self.vfs.setdefault(d, "")
+        return "/".join(parts)
+
+    def vfs_read(self, path: str) -> str | None:
+        n = self.vfs_norm(path)
+        if n in self.vfs and not n.endswith("/"):
+            return self.vfs[n]
+        return None
+
+    def vfs_list(self, path: str = "") -> list[dict]:
+        n = self.vfs_norm(path)
+        prefix = (n + "/") if n else ""
+        names: dict[str, str] = {}
+        for k in self.vfs:
+            if prefix and not k.startswith(prefix):
+                continue
+            rest = k[len(prefix):] if prefix else k
+            if not rest:
+                continue
+            name = rest.split("/")[0].rstrip("/")
+            kind = "dir" if ("/" in rest.rstrip("/") or k.endswith("/")) else "file"
+            if "/" in rest:
+                kind = "dir"
+            if name not in names or kind == "dir":
+                names[name] = kind
+        out = []
+        for name in sorted(names, key=lambda s: (names[s] != "dir", s.lower())):
+            child = f"{prefix}{name}" if prefix else name
+            out.append({
+                "name": name,
+                "path": child.rstrip("/"),
+                "kind": "folder" if names[name] == "dir" else "doc",
+            })
+        return out
+
+    def vfs_tree(self, path: str = "projects", depth: int = 3) -> list[dict]:
+        def walk(base: str, d: int) -> list[dict]:
+            if d < 0:
+                return []
+            nodes = []
+            for ent in self.vfs_list(base):
+                node = {
+                    "name": ent["name"],
+                    "path": ent["path"],
+                    "kind": "dir" if ent["kind"] == "folder" else "file",
+                }
+                if node["kind"] == "dir":
+                    node["children"] = walk(ent["path"], d - 1)
+                nodes.append(node)
+            return nodes
+        return walk(self.vfs_norm(path), depth)
+
+    def editor_tree_for(self, project: str) -> list[dict]:
+        return self.vfs_tree(project or "projects", depth=4)
+
+    async def sync_computer_to_vfs(self, path: str | None = None) -> None:
+        win = self.find_window_by_app("computer")
+        if not win:
+            return
+        cur = path if path is not None else (win.app_state.get("path") or "projects")
+        entries = self.vfs_list(cur)
+        await self.patch_app_state(
+            win.id, {"path": self.vfs_norm(cur) or "projects", "entries": entries}
+        )
+
+    async def sync_editor_tree(self) -> None:
+        win = self.find_window_by_app("editor")
+        if not win:
+            return
+        project = win.app_state.get("project") or "projects"
+        tree = self.editor_tree_for(str(project))
+        open_files = list(win.app_state.get("open_files") or [])
+        await self.patch_app_state(win.id, {"tree": tree, "open_files": open_files})

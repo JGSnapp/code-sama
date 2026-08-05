@@ -6,6 +6,7 @@ import { PaintApp } from "/js/apps/paint.js";
 import { MusicApp } from "/js/apps/music.js";
 import { TrackerApp } from "/js/apps/tracker.js";
 import { ComputerApp } from "/js/apps/computer.js";
+import { WebGameApp } from "/js/apps/webgame.js";
 import { LinuxApp } from "/js/apps/linux.js";
 
 const APPS = {
@@ -15,6 +16,7 @@ const APPS = {
   music: MusicApp,
   tracker: TrackerApp,
   computer: ComputerApp,
+  webgame: WebGameApp,
   linux: LinuxApp,
 };
 
@@ -25,14 +27,30 @@ const TITLE_ICONS = {
   music: "ico-music",
   tracker: "ico-tracker",
   computer: "ico-mycomputer",
+  webgame: "ico-game",
+  linux: "ico-linux",
+};
+
+const DESK_ICON_CLASS = {
+  mycomputer: "ico-mycomputer",
+  recycle: "ico-recycle",
+  browser: "ico-browser",
+  editor: "ico-editor",
+  paint: "ico-paint",
+  music: "ico-music",
+  tracker: "ico-tracker",
+  game: "ico-game",
+  computer: "ico-mycomputer",
   linux: "ico-linux",
 };
 
 export class Desktop {
-  constructor(windowsLayer, taskbarItems) {
+  constructor(windowsLayer, taskbarItems, deskIconsEl) {
     this.layer = windowsLayer;
     this.taskbar = taskbarItems;
+    this.deskIconsEl = deskIconsEl;
     this.windows = new Map();
+    this._selectedIconId = null;
   }
 
   renderAll(state) {
@@ -40,6 +58,25 @@ export class Desktop {
     this.taskbar.innerHTML = "";
     this.windows.clear();
     for (const w of state.windows) this.openWindow(w, state);
+    this.renderDesktopIcons(state.desktopIcons || []);
+  }
+
+  renderDesktopIcons(icons) {
+    if (!this.deskIconsEl) return;
+    this.deskIconsEl.innerHTML = "";
+    for (const ico of icons) {
+      const el = document.createElement("div");
+      el.className = "desk-icon" + (this._selectedIconId === ico.id ? " selected" : "");
+      el.dataset.id = ico.id || "";
+      const glyph = document.createElement("div");
+      const cls = DESK_ICON_CLASS[ico.icon] || DESK_ICON_CLASS[ico.app] || "ico-browser";
+      glyph.className = "ico " + cls;
+      const span = document.createElement("span");
+      span.textContent = ico.label || ico.id || "Icon";
+      el.appendChild(glyph);
+      el.appendChild(span);
+      this.deskIconsEl.appendChild(el);
+    }
   }
 
   openWindow(meta, state) {

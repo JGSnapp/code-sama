@@ -7,12 +7,29 @@ services:
       - "8765:8765"
     env_file:
       - .env
+    environment:
+      # Force Linux broker paths inside the image.
+      HOST: "0.0.0.0"
+      PORT: "8765"
+      WORKSPACE_DIR: "/workspace"
+      LINUX_CAPTURE: "ffmpeg"
+      BROWSER_HEADLESS: "true"
     volumes:
-      # Code-sama's persistent project directory — lives across container
-      # rebuilds so anything she writes stays on disk.
+      # Persistent agent workspace (code she writes, generated manifests).
       - ./workspace:/workspace
-      # Logs land here so you can `tail -f logs/code-sama-os.log` from the
-      # host without exec'ing into the container.
       - ./logs:/opt/code-sama/logs
-    shm_size: "1gb"   # Chromium + X likes shared memory
+      # Keep auth / UI settings / uploads / VRM across rebuilds.
+      - ./settings.json:/opt/code-sama/settings.json
+      - ./uploads:/opt/code-sama/uploads
+      - ./characters:/opt/code-sama/characters
+    shm_size: "1gb"
+    # Needed so Xvfb + ffmpeg can talk; keep privileged off if possible.
+    security_opt:
+      - seccomp:unconfined
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/')"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s

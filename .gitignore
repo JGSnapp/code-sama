@@ -1,3 +1,9 @@
+settings.json
+uploads/
+.server-*.log
+.server-*.log.err
+.server-out.log
+.server-out.err
 .venv/
 __pycache__/
 *.pyc
