@@ -1,20 +1,52 @@
 # code-sama-os
 
-A Windows 95-styled web OS driven entirely by a LangGraph agent. The user
-cannot click anything — they only talk to the agent in the side chat, and the
-agent moves a virtual mouse, types character-by-character, and opens/closes
-windows inside the OS. A small set of "real" apps is bundled:
+A Windows 95-styled web OS driven entirely by LangGraph agents. The user
+cannot click anything — they only talk to code-sama in the side chat, and she
+moves a virtual mouse, types character-by-character, opens and closes windows,
+runs the code she writes, and narrates the whole thing out loud through a 3D
+VRM avatar.
+
+![code-sama OS](docs/screenshots/hero.png)
+
+A small set of "real" apps is bundled:
 
 - **Browser** — Playwright-backed Chromium streaming screenshots into the
   window.
-- **Code Editor** — CodeMirror, the agent types into it.
+- **Code Editor** — CodeMirror + file tree + a sandboxed terminal that
+  actually runs what she writes.
 - **Music Player** — local audio playlist.
 - **Paint** — canvas the agent can draw on.
 - **Task Tracker** — simple to-do list.
+- **Linux apps** — any X11 program, streamed frame-by-frame into a Win95
+  window (Docker mode only, see [App Loader](#app-loader--turn-any-linux-program-into-agent-tools)).
 
-The right-hand side is the agent's chat plus an "agent webcam" that shows the
-[aikeya](./aikeya) VRM avatar (or a built-in placeholder if `AIKEYA_URL` is
-empty).
+The right-hand side is the agent's chat plus an "agent webcam" showing her
+VRM avatar with TTS-driven lip-sync.
+
+## Screenshots
+
+**She writes code and runs it.** The editor has a project tree, tabs, and a
+terminal wired to a real Python sandbox — output lands back in front of the
+viewer (and back in her own context, so she can debug herself):
+
+![Code editor with sandbox terminal](docs/screenshots/editor.png)
+
+**She draws.** Paint strokes are real cursor paths — the mouse travels along
+every segment at human speed:
+
+![Paint](docs/screenshots/paint.png)
+
+**She browses.** A headless Chromium renders the page server-side and streams
+JPEG frames into the window chrome:
+
+![Browser](docs/screenshots/browser.png)
+
+**She talks while her hands work.** The streamer agent narrates each step of
+whatever the worker agent is doing, and every line is spoken by the avatar:
+
+| Avatar | Live narration |
+|---|---|
+| ![Avatar](docs/screenshots/avatar.png) | ![Chat](docs/screenshots/chat.png) |
 
 ## Run
 
@@ -22,7 +54,10 @@ empty).
 ./run.ps1
 ```
 
-Then open <http://127.0.0.1:8765>.
+Then open <http://127.0.0.1:8765>. On first boot you get an empty desktop —
+nothing happens until you give her something to do in the chat:
+
+![Fresh desktop](docs/screenshots/desktop.png)
 
 ### Recommended: Docker (Linux isolation)
 
@@ -58,10 +93,16 @@ still apply, but there is no separate Linux desktop.
 server/
   main.py             FastAPI app, WebSocket /ws, HTTP /chat
   state.py            Authoritative OS state + event bus
+  bus.py              Async pub/sub connecting streamer <-> worker
+  agents.py           Streamer + Worker LangGraph agents, Coordinator
   cursor.py           Bezier path generator + jittery typing intervals
+  tools.py            Built-in agent tools that schedule OS events
+  tool_registry.py    Dynamic tool surface (built-ins + loader apps + MCP)
+  sandbox.py          Subprocess runner behind run_python / run_node
   browser_engine.py   Headless Chromium for the in-OS Browser app
-  agent.py            LangGraph workflow (mirrors api_example.py)
-  tools.py            Agent tools that schedule OS events
+  linux_broker.py     Xvfb-per-app compositor, streams X11 frames
+  models.py           Role -> provider/model routing (models.yml)
+  loader/             App Loader: manifest -> visible agent tools
 web/
   index.html          Win95 shell + apps
   css/, js/, assets/
@@ -70,6 +111,22 @@ web/
 Every agent action goes through `state.py`, which emits broadcast events over
 the WebSocket. The frontend is a passive renderer — `pointer-events: none`
 everywhere except the chat box.
+
+### Two agents, one persona
+
+code-sama is presented to the viewer as a single person, but under the hood
+there are two LangGraph agents on an async event bus:
+
+| | Streamer (the voice) | Worker (the hands) |
+|---|---|---|
+| Role | talks, reacts, narrates | clicks, types, runs code |
+| Tools | `start_coding`, `set_mood`, `stop_coding` | full OS surface + every loader app |
+| Model | fast/chatty (`streamer` role) | strong coding model (`worker` role) |
+
+They run as independent asyncio loops, so the avatar keeps speaking while the
+worker is still typing line three of a script. The streamer's prompt forbids
+ever referring to the worker as a separate entity — results come back framed
+as *"what you yourself just did"*, so she always speaks in first person.
 
 ## App Loader — turn any Linux program into agent tools
 
